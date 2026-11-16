@@ -21,8 +21,14 @@ prefix="editor-$(basename "$PWD" | tr -c 'A-Za-z0-9._\n-' '_')"
 
 # Several terminals can start at the same moment (the editor restores
 # them together), so a name is claimed before it is used.
+# The claims are this user's alone: a directory someone else made (or a link to one) is not used,
+# since whoever owns it could claim names first (the review of 2026-11-16).
 claims="${XDG_RUNTIME_DIR:-/tmp}/remote-gosh-terminals-$(id -u)"
 mkdir -p "$claims" 2>/dev/null
+if [ -L "$claims" ] || [ ! -d "$claims" ] || [ ! -O "$claims" ]; then
+    echo "remote-gosh: $claims is not this user's own directory; this is an ordinary shell instead." >&2
+    plain
+fi
 chmod 700 "$claims" 2>/dev/null
 
 sessions=$(shpool list 2>/dev/null)
@@ -40,6 +46,10 @@ while [ $n -le 64 ]; do
         n=$((n + 1)) # another terminal is taking it right now
     fi
 done
+if [ $n -gt 64 ]; then
+    echo "remote-gosh: all 64 of this workspace's terminal sessions are in use; this is an ordinary shell instead." >&2
+    plain
+fi
 # The claim only has to last until shpool shows the session as attached.
 ( sleep 5; rmdir "$claims/$name" 2>/dev/null ) >/dev/null 2>&1 &
 

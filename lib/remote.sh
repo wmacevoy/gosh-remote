@@ -24,6 +24,22 @@ fetch() { # URL FILE
     fi
 }
 
+# The SHA-256 of a file, or nothing if this machine has no way to work it out.
+digest() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
+    elif command -v openssl >/dev/null 2>&1; then openssl dgst -sha256 "$1" | sed 's/.*= *//'
+    fi
+}
+
+# FILE WANT NAME: fails unless FILE's SHA-256 is WANT (the review of 2026-11-16: nothing downloaded is
+# run until it matches what was published).
+check() {
+    have=$(digest "$1")
+    [ -n "$have" ] || fail "cannot check $3: the remote machine has no sha256sum, shasum or openssl"
+    [ -n "$2" ] && [ "$have" = "$2" ] || fail "$3 does not match its published checksum (expected ${2:-none}, got $have)"
+}
+
 PATH="$HOME/.local/bin:$PATH"
 export PATH
 
@@ -48,19 +64,22 @@ trap 'rm -rf "$work"' EXIT
 
 # ---- 1. gosh
 
-# gosh's programs report mosh's version, not gosh's, so the release installed here is
-# remembered beside them: installed again when it is not the one asked for.
-marker="$HOME/.local/share/remote-gosh/gosh-version"
-installed=$(cat "$marker" 2>/dev/null)
-if [ "$installed" != "$GOSH_VERSION" ] || ! gosh-server --version >/dev/null 2>&1; then
+# Which gosh is here: since gosh 599429f the first line of gosh-server --version says
+# ("gosh-server, of gosh vVERSION"). Installed again when it is not the one asked for.
+release() { gosh-server --version 2>/dev/null | sed -n '1s/^gosh-server, of gosh v//p'; }
+installed=$(release)
+if [ "$installed" != "$GOSH_VERSION" ]; then
     report status "installing gosh $GOSH_VERSION"
+    case "$GOSH_RELEASES" in https://*|file://*) ;; *) fail "gosh releases are fetched by https only, not from $GOSH_RELEASES" ;; esac
+    fetch "$GOSH_RELEASES/v$GOSH_VERSION/SHA256SUMS" "$work/SHA256SUMS" \
+        || fail "could not download the gosh release's SHA256SUMS from $GOSH_RELEASES"
     fetch "$GOSH_RELEASES/v$GOSH_VERSION/install.sh" "$work/install.sh" \
         || fail "could not download the gosh installer from $GOSH_RELEASES"
+    check "$work/install.sh" "$(sed -n 's/^\([0-9a-f]\{64\}\) [ *]install\.sh$/\1/p' "$work/SHA256SUMS")" "gosh's install.sh"
     GOSH_VERSION="$GOSH_VERSION" GOSH_RELEASES="$GOSH_RELEASES" sh "$work/install.sh" >"$work/install.log" 2>&1 \
         || fail "installing gosh failed: $(tail -n 3 "$work/install.log" | tr '\n' ' ')"
-    gosh-server --version >/dev/null 2>&1 || fail "gosh $GOSH_VERSION was installed but gosh-server does not run"
-    mkdir -p "$(dirname "$marker")" && printf '%s\n' "$GOSH_VERSION" >"$marker"
-    installed=$GOSH_VERSION
+    installed=$(release)
+    [ "$installed" = "$GOSH_VERSION" ] || fail "gosh $GOSH_VERSION was installed but gosh-server does not run, or says it is ${installed:-nothing}"
 fi
 report gosh "$installed"
 
@@ -81,14 +100,24 @@ if [ ! -x "$program" ]; then
         -e "s/\${release}/$SERVER_RELEASE/g")
     mkdir -p "$dir" || fail "cannot create $dir"
     fetch "$url" "$work/server.tar.gz" || fail "could not download the editor's server from $url"
+    # VSCodium publishes the SHA-256 of each asset beside it, as ASSET.sha256
+    fetch "$url.sha256" "$work/server.sha256" || fail "could not download the editor's server's checksum from $url.sha256"
+    check "$work/server.tar.gz" "$(sed -n '1s/^\([0-9a-fA-F]\{64\}\).*/\1/p' "$work/server.sha256" | tr 'A-F' 'a-f')" "the editor's server"
     tar -xzf "$work/server.tar.gz" -C "$dir" --strip-components 1 || fail "could not unpack the editor's server"
     [ -x "$program" ] || fail "the editor's server was unpacked but $program is not there"
 fi
 
 listening() { sed -n 's/.*Extension host agent listening on \([0-9][0-9]*\).*/\1/p' "$log" 2>/dev/null | head -n 1; }
 
+# Whether the process saved is the editor's server still, and not another that has its number since.
+ours() {
+    saved=$(cat "$pidfile" 2>/dev/null)
+    # (by the token file it was given: its launcher hands every argument on to what it runs)
+    [ -n "$saved" ] && kill -0 "$saved" 2>/dev/null && ps -p "$saved" -o args= 2>/dev/null | grep -qF -- "$tokenfile"
+}
+
 port=
-if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+if ours; then
     port=$(listening) # one is already running: use it
 fi
 if [ -z "$port" ]; then

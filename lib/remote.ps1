@@ -24,7 +24,15 @@ function Start-Detached($commandLine, $directory) {
     return $result.ProcessId
 }
 
+# The SHA-256 of a file, in lower case hexadecimal (by hand: Get-FileHash is an add-on not always there).
+function Digest($file) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $stream = [IO.File]::OpenRead($file)
+    try { return -join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) } finally { $stream.Close() }
+}
+
 function Fetch($url, $file) {
+    if ($url -notmatch '^(https|file)://') { throw "downloads are by https only, not from $url" }
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     if ($url -match '^file://(.*)$') { Copy-Item -LiteralPath $Matches[1] -Destination $file -Force }
     else { Invoke-WebRequest -Uri $url -OutFile $file -UseBasicParsing }
@@ -52,11 +60,7 @@ try {
             ForEach-Object { $Matches[1] } | Select-Object -First 1)
         if (-not $listed) { Fail "gosh $GOSH_VERSION has no build for a Windows host: $goshName.zip is not in its release" }
         Fetch "$GOSH_RELEASES/v$GOSH_VERSION/$goshName.zip" $zip
-        # (by hand: the commands for this and for unpacking are add-ons that are not always there)
-        $sha = [Security.Cryptography.SHA256]::Create()
-        $stream = [IO.File]::OpenRead($zip)
-        try { $actual = -join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) } finally { $stream.Close() }
-        if ($actual -ne $listed) { Fail "$goshName.zip does not match its published checksum" }
+        if ((Digest $zip) -ne $listed) { Fail "$goshName.zip does not match its published checksum" }
         if (Test-Path $goshDir) { Remove-Item -Recurse -Force $goshDir }
         & tar.exe -xf $zip -C $root
         if ($LASTEXITCODE -ne 0) { Fail "could not unpack $goshName.zip" }
@@ -79,6 +83,11 @@ try {
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
         $archive = Join-Path $work 'server.tar.gz'
         Fetch $url $archive
+        # VSCodium publishes the SHA-256 of each asset beside it, as ASSET.sha256 (the review of 2026-11-16)
+        $published = Join-Path $work 'server.sha256'
+        Fetch "$url.sha256" $published
+        $want = ((Get-Content $published -TotalCount 1) -split '\s+')[0].ToLower()
+        if ($want -notmatch '^[0-9a-f]{64}$' -or (Digest $archive) -ne $want) { Fail "the editor's server does not match its published checksum" }
         & tar.exe -xf $archive -C $dir --strip-components 1
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path $program)) { Fail "could not unpack the editor's server from $url" }
     }
@@ -92,8 +101,9 @@ try {
 
     $port = $null
     if (Test-Path $pidFile) {
-        $running = Get-Process -Id ([int](Get-Content $pidFile)) -ErrorAction SilentlyContinue
-        if ($running) { $port = Listening }   # one is already running: use it
+        # the editor's server still, by the token file it was given, and not another process that has its number since
+        $running = Get-CimInstance Win32_Process -Filter "ProcessId = $([int](Get-Content $pidFile))" -ErrorAction SilentlyContinue
+        if ($running -and $running.CommandLine -and $running.CommandLine.Contains($tokenFile)) { $port = Listening }
     }
     if (-not $port) {
         Report 'status' "starting the editor's server"

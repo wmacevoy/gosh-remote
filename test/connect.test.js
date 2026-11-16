@@ -31,8 +31,9 @@ const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const { connect, relayCommand, shellQuote, powershellQuote, remoteScript, remotePowershell } = require('../lib/connect');
-const { localPackage, ensureLocalClient } = require('../lib/install');
+const { connect, relayCommand, shellQuote, powershellQuote, remoteScript, remotePowershell, checkHost, probe, sshRunner, runRemote,
+    clientOutcome, forwardSpec, clientEnvironment, cmdQuote, platformNotes } = require('../lib/connect');
+const { localPackage, ensureLocalClient, allowedUrl, fetchReleaseFile } = require('../lib/install');
 const { mirror, mirrorDirectory } = require('../lib/mirror');
 
 function get(port, pathname) {
@@ -63,16 +64,128 @@ function unitTests() {
     const decoded = Buffer.from(/FromBase64String\('([^']+)'\)/.exec(typed)[1], 'base64').toString('utf8');
     assert.ok(decoded.startsWith("$A = 'x''y'\n") && decoded.includes('GOSHREMOTE'));
     const viaSsh = relayCommand('', 'me@host', 'sh', { goshPort: '60001' }, '10.0.0.5');
-    assert.deepStrictEqual(viaSsh.slice(0, 5), ['ssh', '-T', '-o', 'BatchMode=yes', 'me@host']);
-    assert.ok(viaSsh[5].startsWith("sh -c '") && viaSsh[5].includes('exec gosh-server relay 10.0.0.5 60001'));
+    assert.deepStrictEqual(viaSsh.slice(0, 6), ['ssh', '-T', '-o', 'BatchMode=yes', '--', 'me@host']);
+    assert.ok(viaSsh[6].startsWith("sh -c '") && viaSsh[6].includes('exec gosh-server relay 10.0.0.5 60001'));
     const win = (server) => relayCommand('C:\\ssh.exe', 'h', 'powershell', { goshPort: '60001', goshServer: server }, '::1');
-    assert.strictEqual(win('C:\\g\\gosh-server.exe')[5], 'C:\\g\\gosh-server.exe relay ::1 60001');
-    assert.strictEqual(win('C:\\a b\\gosh-server.exe')[5], '"C:\\a b\\gosh-server.exe" relay ::1 60001');
+    assert.strictEqual(win('C:\\g\\gosh-server.exe')[6], 'C:\\g\\gosh-server.exe relay ::1 60001');
+    assert.strictEqual(win('C:\\a b\\gosh-server.exe')[6], '"C:\\a b\\gosh-server.exe" relay ::1 60001');
     assert.strictEqual(win('')  , null);
     assert.strictEqual(mirrorDirectory('/m', 'me@host', '/home/me/proj'), path.join('/m', 'me@host', 'home', 'me', 'proj'));
     assert.strictEqual(mirrorDirectory('/m', 'h', '/'), path.join('/m', 'h', 'root'));
     assert.strictEqual(mirrorDirectory('/m', 'a:b', '/x/../y'), path.join('/m', 'a_b', 'x', '_', 'y'));
     console.log('ok   unit tests');
+}
+
+/** The review of 2026-11-16 (gosh's queue, item 11): each thing it found, held to account. */
+async function reviewTests(scratch) {
+    // 1. A host that would be an ssh option, or that no host name could be, is refused before ssh is run;
+    //    and ssh is always told where its options end.
+    const logged = path.join(scratch, 'ssh.log');
+    const fakeSsh = path.join(scratch, 'fake-ssh');
+    fs.writeFileSync(fakeSsh, `#!/bin/sh\nfor w in "$@"; do printf '[%s] ' "$w"; done >>'${logged}'\necho >>'${logged}'\necho Linux\n`);
+    fs.chmodSync(fakeSsh, 0o755);
+    for (const bad of ['-oProxyCommand=touch /tmp/owned', 'a host', 'a\nb', 'a/b', '', 'a\x07b']) {
+        assert.throws(() => checkHost(bad), /is not a host name/, JSON.stringify(bad));
+        await assert.rejects(probe(fakeSsh, bad), /is not a host name/);
+        await assert.rejects(connect({ host: bad, product: {}, log: () => {} }), /is not a host name/);
+        await assert.rejects(mirror({ host: bad, remotePath: '/x', localDir: path.join(scratch, 'm') }), /is not a host name/);
+    }
+    assert.ok(!fs.existsSync(logged), 'ssh was never run for them');
+    for (const good of ['me@host', 'host.example.org', 'me@[2001:db8::1]', 'pretend-host', 'h_1:22']) {
+        assert.strictEqual(checkHost(good), good);
+    }
+    assert.strictEqual(await probe(fakeSsh, 'me@host'), 'sh');
+    sshRunner(fakeSsh)('me@host', 'sh').stdin.end();
+    await new Promise(resolve => setTimeout(resolve, 300));
+    for (const line of fs.readFileSync(logged, 'utf8').trim().split('\n')) {
+        assert.ok(line.includes('[--] [me@host]'), `ssh is told where its options end: ${line}`);
+    }
+    assert.ok(relayCommand('', 'me@host', 'sh', { goshPort: '60001' }, '10.0.0.5').join(' ').includes('-- me@host'));
+    console.log('ok   review: a host that would be an ssh option is refused, and ssh is told where its options end');
+
+    // 3. Connected means gosh's own line; "connected, but the server does not forward" is a failure.
+    assert.strictEqual(clientOutcome('gosh: connected; forwarding.\n'), 'connected');
+    assert.strictEqual(clientOutcome('gosh: connected, but the server does not forward: it is a stock mosh-server, or was not given\n'
+        + 'the forwards.  None of them will be done.\n'), 'refused');
+    assert.strictEqual(clientOutcome('gosh: connected.\n'), 'refused', 'connected, with no forward: of no use to the editor');
+    assert.strictEqual(clientOutcome('gosh: no answer by UDP; trying through ssh as well.\n'), null);
+    console.log('ok   review: only "gosh: connected; forwarding." is connected');
+
+    // 4. The forward the client is given is the one computed here; the host's port is only a number.
+    assert.strictEqual(forwardSpec(41000, { serverPort: '9', spec: '0.0.0.0:46011:127.0.0.1:9' }), '41000:127.0.0.1:9');
+    for (const port of ['0', '65536', '9 -R x', '-1', '1e3', '']) {
+        assert.throws(() => forwardSpec(41000, { serverPort: port }), /port/);
+    }
+    console.log('ok   review: the forward is ours, never the host\'s text');
+
+    // 9. What the host may say is limited to what is asked of it; notes are only a list.
+    const said = (lines) => () => {
+        const child = spawn('sh', ['-c', `printf '%s\\n' ${lines.map(shellQuote).join(' ')}; cat >/dev/null`], { stdio: ['pipe', 'pipe', 'pipe'] });
+        return child;
+    };
+    const got = await runRemote(said(['GOSHREMOTE notes==x==', 'GOSHREMOTE note==one==', 'GOSHREMOTE notAKey==y==',
+        'GOSHREMOTE constructor==z==', 'GOSHREMOTE done==yes==']), 'h', 'sh', '', () => {});
+    assert.deepStrictEqual(got.notes, ['one']);
+    assert.ok(!Object.prototype.hasOwnProperty.call(got, 'notAKey') && !Object.prototype.hasOwnProperty.call(got, 'constructor'));
+    console.log('ok   review: the host may report only what it is asked, and notes are a list');
+
+    // 5. The client's environment never keeps a relay command that is not this connection's.
+    const env = clientEnvironment({ GOSH_RELAY_COMMAND: 'stale', PATH: '/bin' }, 'KEY', 'auto', null);
+    assert.ok(!('GOSH_RELAY_COMMAND' in env) && env.GOSH_RELAY === 'never' && env.MOSH_KEY === 'KEY' && env.PATH === '/bin');
+    assert.strictEqual(clientEnvironment({}, 'K', 'always', ['a', 'b']).GOSH_RELAY_COMMAND, 'a\x1fb');
+    console.log('ok   review: a stale relay command is not passed on');
+
+    // 9. Quoting for PowerShell (typographic quotes end its strings too) and for cmd (& and the like).
+    assert.strictEqual(powershellQuote('a\u2019b\u2018c\u201ad\u201be'), "'a\u2019\u2019b\u2018\u2018c\u201a\u201ad\u201b\u201be'");
+    assert.strictEqual(cmdQuote('C:\\a&b\\gosh-server.exe'), '"C:\\a&b\\gosh-server.exe"');
+    assert.strictEqual(cmdQuote('C:\\g\\gosh-server.exe'), 'C:\\g\\gosh-server.exe');
+    assert.throws(() => cmdQuote('C:\\a"b\\x.exe'), /cannot/);
+    console.log('ok   review: quoting for PowerShell and cmd');
+
+    // 7. A Windows host is said to be experimental (REQ4/EXT-2).
+    assert.ok(platformNotes('powershell').some(n => /experimental/i.test(n)));
+    assert.deepStrictEqual(platformNotes('sh'), []);
+    console.log('ok   review: a Windows host is labelled experimental when connected to');
+
+    // 6. A host name cannot put a local copy outside its folder; 5. nor can a folder name with control characters.
+    for (const host of ['a/../../../escaped', '..', '../x', 'a/b']) {
+        const where = mirrorDirectory('/root/copies', host, '/p');
+        assert.ok(path.relative('/root/copies', where).split(path.sep)[0] !== '..' && where.startsWith('/root/copies/'), `${host} -> ${where}`);
+    }
+    await assert.rejects(mirror({ host: 'h', remotePath: '/a\x07b', localDir: path.join(scratch, 'm') }), /control characters/);
+    await assert.rejects(mirror({ host: 'h', remotePath: '/a', localDir: path.join(scratch, 'm\x01') }), /control characters/);
+    console.log('ok   review: a local copy stays in its folder; control characters are refused');
+
+    // 2. Downloads are by https only, and checked; 8. a client is the release it says it is.
+    assert.ok(allowedUrl('https://github.com/x') && !allowedUrl('http://github.com/x') && !allowedUrl('ftp://x'));
+    await assert.rejects(fetchReleaseFile('http://example.invalid/r', '1.0', 'SHA256SUMS', path.join(scratch, 'x')), /https/);
+    const fake = version => {
+        const where = fs.mkdtempSync(path.join(scratch, 'fake-release-'));
+        const { name } = localPackage('1.0');
+        fs.mkdirSync(path.join(where, 'stage', name, 'bin'), { recursive: true });
+        fs.writeFileSync(path.join(where, 'stage', name, 'bin', 'gosh-client'),
+            `#!/bin/sh\necho 'gosh-client, of gosh ${version}'\necho 'mosh-client (mosh 1.4.0)'\n`);
+        fs.chmodSync(path.join(where, 'stage', name, 'bin', 'gosh-client'), 0o755);
+        fs.mkdirSync(path.join(where, 'v1.0'));
+        const archive = path.join(where, 'v1.0', `${name}.tar.gz`);
+        assert.strictEqual(require('child_process').spawnSync('tar', ['-czf', archive, '-C', path.join(where, 'stage'), name]).status, 0);
+        const digest = require('crypto').createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
+        return { where, archive, name, digest };
+    };
+    let r = fake('v1.0');
+    fs.writeFileSync(path.join(r.where, 'v1.0', 'SHA256SUMS'), `${r.digest}  ${r.name}.tar.gz\n`);
+    assert.ok((await ensureLocalClient({ version: '1.0', releases: r.where, storageDir: path.join(r.where, 's') })).endsWith('gosh-client'));
+    r = fake('v1.0');
+    fs.writeFileSync(path.join(r.where, 'v1.0', 'SHA256SUMS'), `${r.digest}  something-else.tar.gz\n`);
+    await assert.rejects(ensureLocalClient({ version: '1.0', releases: r.where, storageDir: path.join(r.where, 's') }), /not listed/);
+    r = fake('v1.0');
+    fs.writeFileSync(path.join(r.where, 'v1.0', 'SHA256SUMS'), `${'0'.repeat(64)}  ${r.name}.tar.gz\n`);
+    await assert.rejects(ensureLocalClient({ version: '1.0', releases: r.where, storageDir: path.join(r.where, 's') }), /does not match/);
+    assert.ok(!fs.existsSync(path.join(r.where, 's', r.name)), 'nothing unpacked from a download that does not match');
+    r = fake('v0.9');
+    fs.writeFileSync(path.join(r.where, 'v1.0', 'SHA256SUMS'), `${r.digest}  ${r.name}.tar.gz\n`);
+    await assert.rejects(ensureLocalClient({ version: '1.0', releases: r.where, storageDir: path.join(r.where, 's') }), /does not run|not gosh 1.0/);
+    console.log('ok   review: releases by https only, checked, and the client is the release it says it is');
 }
 
 /**
@@ -192,6 +305,31 @@ async function persistentTerminals(options, remoteHome) {
     assert.strictEqual(launch(), `--dir ${workspace} editor-my_project-3`, 'and does not hand the same one to two terminals at once');
     console.log('ok   persistent terminals: each terminal gets its own session, reusing ones left behind');
 
+    // ... but not through a claims directory that is not the user's own, nor a 65th name: an ordinary shell then.
+    const plainShell = path.join(remoteHome, 'plain-shell');
+    fs.writeFileSync(plainShell, `#!/bin/sh\necho plain >>'${path.join(remoteHome, 'plain-used')}'\n`);
+    fs.chmodSync(plainShell, 0o755);
+    const launchPlain = runtime => {
+        const before = fs.readFileSync(path.join(remoteHome, 'shpool-attached'), 'utf8');
+        try { fs.rmSync(path.join(remoteHome, 'plain-used')); } catch (error) { /* none yet */ }
+        const result = require('child_process').spawnSync('sh', [launcher], {
+            cwd: workspace, encoding: 'utf8',
+            env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: remoteHome, XDG_RUNTIME_DIR: runtime, SHELL: plainShell },
+        });
+        return { plain: fs.existsSync(path.join(remoteHome, 'plain-used')),
+            attached: fs.readFileSync(path.join(remoteHome, 'shpool-attached'), 'utf8') !== before, stderr: result.stderr };
+    };
+    const borrowed = path.join(remoteHome, 'borrowed-run');
+    fs.mkdirSync(path.join(borrowed, 'elsewhere'), { recursive: true });
+    fs.symlinkSync(path.join(borrowed, 'elsewhere'), path.join(borrowed, `remote-gosh-terminals-${process.getuid()}`));
+    let ran = launchPlain(borrowed);
+    assert.ok(ran.plain && !ran.attached, `a claims directory that is a link elsewhere is not used: ${ran.stderr}`);
+    const full = Array.from({ length: 64 }, (_, i) => `editor-my_project-${i + 1}\t2026-01-01T00:00:00+00:00\tattached`).join('\n');
+    fs.writeFileSync(path.join(remoteHome, 'shpool-sessions'), `NAME\tSTARTED_AT\tSTATUS\n${full}\n`);
+    ran = launchPlain(path.join(remoteHome, 'run'));
+    assert.ok(ran.plain && !ran.attached, `with every name taken, an ordinary shell, not a 65th attach: ${ran.stderr}`);
+    console.log('ok   review: the launcher keeps to its own claims, and to its 64 names');
+
     // turned off again: our entries go, and nothing else
     await reconnect({ persistentTerminals: 'off' });
     settings = readSettings();
@@ -242,9 +380,11 @@ function releaseFromBuild(gosh, version, where) {
     const tar = require('child_process').spawnSync('tar', ['-czf', archive, '-C', path.dirname(stage), name]);
     assert.strictEqual(tar.status, 0, String(tar.stderr));
     const digest = require('crypto').createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
-    fs.writeFileSync(path.join(out, 'SHA256SUMS'), `${digest}  ${name}.tar.gz\n`);
     const installer = fs.readFileSync(path.join(gosh, 'tools', 'install.sh'), 'utf8').replace('@VERSION@', version);
     fs.writeFileSync(path.join(out, 'install.sh'), installer);
+    const installerDigest = require('crypto').createHash('sha256').update(installer).digest('hex');
+    // (as gosh's release workflow lists them: the packages, and install.sh)
+    fs.writeFileSync(path.join(out, 'SHA256SUMS'), `${digest}  ${name}.tar.gz\n${installerDigest}  install.sh\n`);
     return where;
 }
 
@@ -271,7 +411,7 @@ function standInServer(where) {
         's = http.server.HTTPServer(("127.0.0.1", 0), H)',
         'print("Extension host agent listening on %d" % s.server_port, flush=True)',
         's.serve_forever()',
-        '\'',
+        '\' "$@"', // (its arguments handed on, as the real server's launcher does)
         '',
     ].join('\n'));
     fs.chmodSync(path.join(top, 'bin', 'codium-server'), 0o755);
@@ -280,6 +420,8 @@ function standInServer(where) {
     const archive = path.join(where, 'server.tar.gz');
     const tar = require('child_process').spawnSync('tar', ['-czf', archive, '-C', path.dirname(top), 'standin']);
     assert.strictEqual(tar.status, 0, String(tar.stderr));
+    const digest = require('crypto').createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
+    fs.writeFileSync(`${archive}.sha256`, `${digest}  server.tar.gz\n`); // (as VSCodium publishes one beside each asset)
     return `file://${archive}`;
 }
 
@@ -303,6 +445,12 @@ function stopProgramsUnder(dir) {
 
 async function main() {
     unitTests();
+    const reviewScratch = fs.mkdtempSync(path.join(os.tmpdir(), 'remote-gosh-review-'));
+    try {
+        await reviewTests(reviewScratch);
+    } finally {
+        fs.rmSync(reviewScratch, { recursive: true, force: true });
+    }
 
     const windows = process.platform === 'win32';
     if (windows) {
@@ -310,7 +458,11 @@ async function main() {
         console.log('skip end-to-end test (gosh has no Windows build yet)');
         return;
     }
-    const goshVersion = process.env.GOSH_VERSION || '0.0.test';
+    // (the release's version is the one its programs say: gosh-server --version, since gosh 599429f)
+    const built = process.env.GOSH_BUILD
+        && /of gosh v(\S+)/.exec(require('child_process').spawnSync(path.join(path.resolve(process.env.GOSH_BUILD), '.build', 'bin', 'gosh-client'),
+            ['--version'], { encoding: 'utf8' }).stdout || '');
+    const goshVersion = process.env.GOSH_VERSION || (built ? built[1] : '0.0.test');
     const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'remote-gosh-test-'));
     let releases = process.env.GOSH_RELEASES;
     if (!releases && process.env.GOSH_BUILD) {
@@ -358,6 +510,8 @@ async function main() {
         assert.ok(fs.existsSync(path.join(remoteHome, '.local', 'bin', 'gosh-server')), 'server installed remotely');
         assert.ok(lines.some(l => l.includes('installing gosh')) && lines.some(l => l.includes("installing the editor's server")));
         assert.ok(/^[0-9a-f]{32}$/.test(first.token), 'a connection token');
+        const tokenMode = fs.statSync(path.join(remoteHome, '.vscodium-server', '.test-commit.token')).mode & 0o777;
+        assert.strictEqual(tokenMode, 0o600, `the token is the user's alone (it is ${tokenMode.toString(8)})`);
         console.log('ok   connects from nothing, installing gosh at both ends and the editor server');
 
         // the editor's server answers on the local port, through gosh
@@ -384,6 +538,49 @@ async function main() {
         assert.strictEqual((await get(second.port, '/version')).status, 200);
         first = null;
         console.log('ok   closing a connection stops its gosh session and no other');
+
+        // A saved process id now someone else's: not taken for the editor's server, whose port it is not.
+        {
+            const data = path.join(remoteHome, '.vscodium-server');
+            const oldPid = Number(fs.readFileSync(path.join(data, '.test-commit.pid'), 'utf8').trim());
+            second.dispose();
+            await second.exited;
+            second = null;
+            try { process.kill(oldPid); } catch (error) { /* gone */ }
+            const other = spawn('sleep', ['120'], { stdio: 'ignore' }); // alive, the test's own, and not the server
+            fs.writeFileSync(path.join(data, '.test-commit.pid'), `${other.pid}\n`);
+            fs.writeFileSync(path.join(data, '.test-commit.log'), 'Extension host agent listening on 1\n');
+            lines.length = 0;
+            try {
+                second = await connect(options);
+                assert.ok(lines.some(l => l.includes('starting')), 'a new server was started');
+                assert.strictEqual((await get(second.port, '/version')).status, 200);
+            } finally {
+                other.kill();
+            }
+            console.log('ok   review: a saved process id now another program\'s is not taken for the server');
+        }
+
+        // What the host downloads is checked before it is run: gosh's installer, and the editor's server.
+        {
+            const tampered = path.join(scratch, 'tampered');
+            fs.cpSync(releases, tampered, { recursive: true });
+            fs.appendFileSync(path.join(tampered, `v${goshVersion}`, 'install.sh'), '\n# changed after it was published\n');
+            const otherHome = path.join(scratch, 'other-home');
+            fs.mkdirSync(otherHome);
+            const elsewhere = { ...options, releases: `file://${path.resolve(tampered)}`, runner: () => spawn('sh', [], {
+                stdio: ['pipe', 'pipe', 'pipe'], env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: otherHome, LC_ALL: 'C.UTF-8', GOSH_STUN: 'none' } }) };
+            await assert.rejects(connect(elsewhere), /install\.sh.*(checksum|SHA256SUMS)/);
+            assert.ok(!fs.existsSync(path.join(otherHome, '.local', 'bin', 'gosh-server')), 'and nothing of it was run');
+            if (serverUrl) {
+                const archive = serverUrl.replace(/^file:\/\//, '');
+                fs.writeFileSync(`${archive}.sha256`, `${'0'.repeat(64)}  server.tar.gz\n`);
+                await assert.rejects(connect({ ...elsewhere, releases: options.releases }), /editor's server.*checksum/);
+                assert.ok(!fs.existsSync(path.join(otherHome, '.vscodium-server', 'bin', 'test-commit', 'bin')), 'and it was not unpacked');
+                fs.writeFileSync(`${archive}.sha256`, `${require('crypto').createHash('sha256').update(fs.readFileSync(archive)).digest('hex')}  server.tar.gz\n`);
+            }
+            console.log('ok   review: the host runs nothing it downloaded until it matches its published checksum');
+        }
 
         // (Not on Windows.  There, with both ends on one machine and the relay started directly, the
         // relayed session's server ends within a tenth of a second of connecting, and why is not yet
@@ -440,10 +637,12 @@ async function main() {
                 await connection.exited;
             }
         }
-        try {
-            const pid = fs.readFileSync(path.join(remoteHome, '.vscodium-server', '.test-commit.pid'), 'utf8').trim();
-            process.kill(Number(pid));
-        } catch (error) { /* it never started */ }
+        for (const home of [remoteHome, path.join(scratch, 'other-home')]) {
+            try {
+                const pid = fs.readFileSync(path.join(home, '.vscodium-server', '.test-commit.pid'), 'utf8').trim();
+                process.kill(Number(pid));
+            } catch (error) { /* it never started */ }
+        }
         // (and any gosh-server the test's sessions left: only programs under its own home, by pid,
         // never by name: other gosh and mosh sessions on this machine are not the test's)
         stopProgramsUnder(fs.realpathSync(scratch));
