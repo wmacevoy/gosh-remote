@@ -1,0 +1,11 @@
+test/**
+tools/**
+.github/**
+.gitignore
+.pixi/**
+.shpool-build/**
+pixi.toml
+pixi.lock
+node_modules/**
+package-lock.json
+third-party/**

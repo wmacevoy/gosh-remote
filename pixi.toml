@@ -1,0 +1,37 @@
+# Everything needed to test and package the extension, without Node.js
+# installed system-wide:
+#
+#     pixi run test     the tests (see test/connect.test.js for the full one)
+#     pixi run vsix     build remote-mosh-VERSION.vsix
+#     pixi run shpool   build the shpool the extension carries for hosts like
+#                       this machine (Linux or macOS); the .vsix includes
+#                       whatever has been built
+#
+# pixi provides Node.js, and Rust for building shpool; the packaging
+# tool (vsce) comes from npm, at the version recorded in package-lock.json.
+
+[workspace]
+name = "remote-mosh"
+channels = ["conda-forge"]
+platforms = ["linux-64", "linux-aarch64", "osx-arm64", "osx-64", "win-64"]
+
+[dependencies]
+nodejs = "22.*"
+
+[tasks]
+# the packaging tool, exactly as locked
+deps = { cmd = "npm ci --no-audit --no-fund", inputs = ["package.json", "package-lock.json"], outputs = ["node_modules/.package-lock.json"] }
+test = "node test/connect.test.js"
+vsix = { cmd = "npm run package", depends-on = ["deps"] }
+
+# Rust, only for building shpool.
+[feature.shpool.dependencies]
+rust = "*"
+c-compiler = "*"
+
+[feature.shpool.tasks]
+shpool = "node tools/build-shpool.js"
+shpool-test = { cmd = "python3 test/shpool.test.py shpool/*/shpool", depends-on = ["shpool"] }
+
+[environments]
+shpool = ["shpool"]

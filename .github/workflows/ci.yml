@@ -1,0 +1,133 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+# The end-to-end test uses the real, published mosh release and the
+# editor's real server.  The "host" is the runner itself, reached by a
+# local shell instead of ssh.
+env:
+  MOSH_RELEASES: https://github.com/wmacevoy/mosh/releases/download
+  MOSH_VERSION: 1.4.0-pf.4
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: prefix-dev/setup-pixi@v0.8.1
+
+    # Everywhere: the unit tests, and installing the mosh client for this machine.
+    # Not on Windows: the full connection, which needs a host that is not Windows.
+    - name: "test"
+      run: pixi run test
+
+  # The shpool the extension carries, for each kind of host it can be
+  # given to.  Built on the oldest Ubuntu there is a runner for, so that
+  # it runs on anything newer; one program for both kinds of Mac.
+  shpool:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: linux-x64
+            os: ubuntu-22.04
+          - kind: linux-arm64
+            os: ubuntu-22.04-arm
+          - kind: darwin
+            os: macos-latest
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/cache@v4
+      id: cache
+      with:
+        path: shpool
+        key: shpool-${{ matrix.kind }}-${{ hashFiles('tools/build-shpool.js') }}
+
+    # with the runner's own Rust, which on a Mac can build for both kinds
+    - name: "build"
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: node tools/build-shpool.js
+
+    - name: "what it needs from the system"
+      run: |
+        file shpool/${{ matrix.kind }}/shpool
+        if [ "$(uname -s)" = Darwin ]; then
+          otool -L shpool/${{ matrix.kind }}/shpool
+        else
+          ldd shpool/${{ matrix.kind }}/shpool
+          echo "needs up to $(objdump -T shpool/${{ matrix.kind }}/shpool | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -n 1)"
+        fi
+
+    - name: "the terminal launcher, with this shpool"
+      run: python3 test/shpool.test.py shpool/${{ matrix.kind }}/shpool
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: shpool-${{ matrix.kind }}
+        path: shpool/
+
+  package:
+    needs: shpool
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: shpool-*
+        path: shpool
+        merge-multiple: true
+
+    - name: "the shpool programs to go in the package"
+      run: |
+        chmod 755 shpool/*/shpool
+        ls -l shpool shpool/*
+        test -x shpool/linux-x64/shpool && test -x shpool/linux-arm64/shpool && test -x shpool/darwin/shpool && test -s shpool/LICENSE
+
+    - uses: prefix-dev/setup-pixi@v0.8.1
+
+    - name: "build the .vsix"
+      run: |
+        pixi run vsix
+        unzip -l *.vsix | grep -E "shpool|extension\.js|terminal\.sh"
+        test "$(unzip -l *.vsix | grep -c 'extension/shpool/.*/shpool$')" = 3
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: remote-mosh-vsix
+        path: "*.vsix"
+        if-no-files-found: error
+
+    # A tag named vVERSION publishes the package as a release.
+    - name: "release"
+      if: github.ref_type == 'tag'
+      run: |
+        version=$(node -p "require('./package.json').version")
+        if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+          echo "::error::the tag is $GITHUB_REF_NAME but package.json says v$version"
+          exit 1
+        fi
+        gh release create "$GITHUB_REF_NAME" *.vsix --title "Remote - Mosh $version" \
+          --notes "Install the .vsix with **Extensions: Install from VSIX...**. See the README for what it needs and how to allow the API it uses. Experimental."
+      env:
+        GH_TOKEN: ${{ github.token }}
