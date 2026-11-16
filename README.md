@@ -17,13 +17,23 @@ design, queue and findings live in gosh (`docs/REQUIREMENTS_v16.md`, `REQ1/EXT-1
 
 ## What it does when you connect
 
-1. Installs the gosh client for your machine, if it isn't there, into the extension's own storage,
-   after checking the download against the release's `SHA256SUMS`. Nothing is installed
+1. Installs the gosh client for your machine, if it isn't there, into the extension's own storage.
+   The download comes by https only, and is unpacked only if it matches the SHA-256 the release's
+   `SHA256SUMS` lists for it; the client must then say it is that release. Nothing is installed
    system-wide.
 2. Logs in to the host with `ssh` and, if they aren't there already, installs gosh (into
-   `~/.local/bin`, no root needed, by the release's own `install.sh`) and the editor's server;
-   starts the server; and starts a gosh session that forwards a port to it.
-3. Starts the gosh client on your machine with no terminal (`-N`) as the other end of that session.
+   `~/.local/bin`, no root needed, by the release's own `install.sh`, run only if it matches the
+   release's `SHA256SUMS`) and the editor's server (unpacked only if it matches the `.sha256`
+   VSCodium publishes beside it); starts the server; and starts a gosh session that forwards a port
+   to it.
+3. Starts the gosh client on your machine with no terminal (`-N`) as the other end of that session,
+   forwarding a port on your machine's loopback address (`127.0.0.1`) that the extension chooses.
+
+**What the checksums prove, and what not.** A `SHA256SUMS` or `.sha256` comes from the same place as
+the file it lists, so the check catches a download that was damaged or swapped on the way, or a
+mirror serving something else; it does not prove who published the release. That rests on https
+and on GitHub's account of who can publish there. A host name that ssh could take for one of its
+options (one beginning with `-`) is refused, as is one with spaces, control characters or `/`.
 
 After that ssh is finished with, and everything goes through gosh, unless UDP cannot reach the
 host: see [When UDP is blocked](#when-udp-is-blocked).
@@ -33,10 +43,10 @@ host: see [When UDP is blocked](#when-udp-is-blocked).
 | | |
 | --- | --- |
 | Your machine | Linux (x86-64, ARM64) or macOS 11+. **Not Windows yet**: gosh's releases have no Windows build. |
-| The host | Linux (x86-64, ARM64; glibc 2.34+) or macOS 11+. A Windows host is experimental (`REQ4/EXT-2`), and waits on that same build. |
+| The host | Linux (x86-64, ARM64; glibc 2.34+) or macOS 11+. A Windows host is experimental (`REQ4/EXT-2`), and waits on that same build; a connection to one says so. |
 | `ssh` | On your machine, able to log in to the host **without asking anything**: keys or an agent, and a host key already accepted. There is nowhere for it to ask for a password. `ssh -o BatchMode=yes HOST true` must work. |
 | UDP | gosh uses a UDP port between 60000 and 61000 on the host. If your machine cannot reach it, the session is carried over ssh instead. |
-| On the host | `curl` or `wget`, and `tar`. |
+| On the host | `curl` or `wget`, `tar`, and `sha256sum`, `shasum` or `openssl` (to check what it downloads). |
 | The editor | VSCodium, with this extension allowed to use the API it needs (below). |
 
 ### Allowing the API
@@ -74,7 +84,7 @@ connection to a host takes a while, because it downloads gosh and the editor's s
 
 - `remoteGosh.goshVersion`: the gosh release to use at both ends (default `0.2`).
 - `remoteGosh.releasesUrl`: where to download gosh from, if not GitHub (each release is the
-  directory `vVERSION` under it).
+  directory `vVERSION` under it). By https only, or a directory on your machine.
 - `remoteGosh.sshPath`: the ssh program, if not the one on your `PATH`.
 - `remoteGosh.serverDownloadUrlTemplate`: where hosts get the editor's server.
 - `remoteGosh.persistentTerminals`: `off` (the default) or `shpool`; see below.
@@ -134,7 +144,15 @@ Tested, by `node test/connect.test.js` with `GOSH_BUILD` set to a built gosh che
 - the session carried by the relay when told to, and found by itself when UDP gets no answer;
 - keeping a local copy of a folder: it arrives, and changes, additions and removals follow;
 - the persistent-terminals setting, with a stand-in shpool and with the real 0.11.6
-  (`test/shpool.test.py`).
+  (`test/shpool.test.py`);
+- what the review of 2026-11-16 found, each case seen to fail before it was mended: a host that ssh
+  would take for an option, refused, and ssh always told where its options end; downloads by https
+  only, and each checked before it is unpacked or run (a changed `install.sh`, a changed editor
+  server, a client that is not the release asked for); only `gosh: connected; forwarding.` taken for
+  connected; the forward always the extension's own, on loopback; only the keys asked for taken from
+  the host; the editor's server's token readable by its user alone; a saved process id that is now
+  another program's not taken for the server; a local copy kept inside its folder whatever the host
+  is called; the terminal launcher's claims kept to the user's own directory, and to 64 sessions.
 
 **Not tested:**
 
