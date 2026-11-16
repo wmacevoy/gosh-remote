@@ -1,8 +1,9 @@
+# Copyright 2026 Warren D. MacEvoy. GPL-3.0-or-later. See github.com/wmacevoy/gosh/LICENSE-GOSH, and LICENSE-MOSH.
 # Everything needed to test and package the extension, without Node.js
 # installed system-wide:
 #
 #     pixi run test     the tests (see test/connect.test.js for the full one)
-#     pixi run vsix     build remote-mosh-VERSION.vsix
+#     pixi run vsix     build remote-gosh-VERSION.vsix
 #     pixi run shpool   build the shpool the extension carries for hosts like
 #                       this machine (Linux or macOS); the .vsix includes
 #                       whatever has been built
@@ -11,7 +12,7 @@
 # tool (vsce) comes from npm, at the version recorded in package-lock.json.
 
 [workspace]
-name = "remote-mosh"
+name = "remote-gosh"
 channels = ["conda-forge"]
 platforms = ["linux-64", "linux-aarch64", "osx-arm64", "osx-64", "win-64"]
 

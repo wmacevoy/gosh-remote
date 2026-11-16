@@ -1,13 +1,13 @@
 {
-  "name": "remote-mosh",
-  "displayName": "Remote - Mosh",
-  "description": "Work on a remote machine over mosh: the connection survives changing networks, sleep, and outages.",
+  "name": "remote-gosh",
+  "displayName": "Remote - Gosh",
+  "description": "Work on a remote machine over gosh: the connection survives changing networks, sleep, and outages. Not independently reviewed.",
   "version": "0.1.0",
   "publisher": "wmacevoy",
   "license": "GPL-3.0-or-later",
   "repository": {
     "type": "git",
-    "url": "https://github.com/wmacevoy/remote-mosh"
+    "url": "https://github.com/wmacevoy/remote-gosh"
   },
   "engines": {
     "vscode": "^1.75.0"
@@ -17,6 +17,7 @@
   ],
   "keywords": [
     "remote",
+    "gosh",
     "mosh",
     "ssh",
     "roaming"
@@ -28,68 +29,68 @@
     "resolvers"
   ],
   "activationEvents": [
-    "onResolveRemoteAuthority:mosh"
+    "onResolveRemoteAuthority:gosh"
   ],
   "main": "./extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "remoteMosh.connect",
+        "command": "remoteGosh.connect",
         "title": "Connect to Host...",
-        "category": "Remote-Mosh"
+        "category": "Remote-Gosh"
       },
       {
-        "command": "remoteMosh.connectCurrentWindow",
+        "command": "remoteGosh.connectCurrentWindow",
         "title": "Connect Current Window to Host...",
-        "category": "Remote-Mosh"
+        "category": "Remote-Gosh"
       },
       {
-        "command": "remoteMosh.showLog",
+        "command": "remoteGosh.showLog",
         "title": "Show Log",
-        "category": "Remote-Mosh"
+        "category": "Remote-Gosh"
       },
       {
-        "command": "remoteMosh.localCopies",
+        "command": "remoteGosh.localCopies",
         "title": "Choose Folders to Keep a Local Copy Of...",
-        "category": "Remote-Mosh"
+        "category": "Remote-Gosh"
       },
       {
-        "command": "remoteMosh.copyThisFolder",
+        "command": "remoteGosh.copyThisFolder",
         "title": "Keep a Local Copy of This Folder",
-        "category": "Remote-Mosh"
+        "category": "Remote-Gosh"
       },
       {
-        "command": "remoteMosh.openLocalCopies",
+        "command": "remoteGosh.openLocalCopies",
         "title": "Open the Folder of Local Copies",
-        "category": "Remote-Mosh"
+        "category": "Remote-Gosh"
       }
     ],
     "menus": {
       "statusBar/remoteIndicator": [
         {
-          "command": "remoteMosh.connect",
-          "group": "remote_30_mosh@1"
+          "command": "remoteGosh.connect",
+          "group": "remote_30_gosh@1"
         },
         {
-          "command": "remoteMosh.connectCurrentWindow",
-          "group": "remote_30_mosh@2"
+          "command": "remoteGosh.connectCurrentWindow",
+          "group": "remote_30_gosh@2"
         },
         {
-          "command": "remoteMosh.showLog",
-          "when": "remoteName == mosh",
-          "group": "remote_30_mosh@3"
+          "command": "remoteGosh.showLog",
+          "when": "remoteName == gosh",
+          "group": "remote_30_gosh@3"
         }
       ],
       "explorer/context": [
         {
-          "command": "remoteMosh.copyThisFolder",
-          "when": "explorerResourceIsFolder && resourceScheme == vscode-remote && remoteName == mosh",
+          "command": "remoteGosh.copyThisFolder",
+          "when": "explorerResourceIsFolder && resourceScheme == vscode-remote && remoteName == gosh",
           "group": "7_modification@9"
         }
       ],
       "commandPalette": [
         {
-          "command": "remoteMosh.copyThisFolder",
+          "command": "remoteGosh.copyThisFolder",
           "when": "false"
         }
       ]
@@ -97,39 +98,39 @@
     "resourceLabelFormatters": [
       {
         "scheme": "vscode-remote",
-        "authority": "mosh+*",
+        "authority": "gosh+*",
         "formatting": {
           "label": "${path}",
           "separator": "/",
           "tildify": true,
-          "workspaceSuffix": "Mosh"
+          "workspaceSuffix": "Gosh"
         }
       }
     ],
     "configuration": {
-      "title": "Remote - Mosh",
+      "title": "Remote - Gosh",
       "properties": {
-        "remoteMosh.moshVersion": {
+        "remoteGosh.goshVersion": {
           "type": "string",
-          "default": "1.4.0-pf.4",
-          "description": "The release of mosh (with port forwarding) to use. It is installed on this machine and on each host you connect to."
+          "default": "0.2",
+          "description": "The release of gosh to use. It is installed on this machine and on each host you connect to, from gosh's releases (tag vVERSION)."
         },
-        "remoteMosh.releasesUrl": {
+        "remoteGosh.releasesUrl": {
           "type": "string",
           "default": "",
-          "description": "Where mosh releases are downloaded from, if not GitHub. The host you connect to downloads from here too."
+          "description": "Where gosh releases are downloaded from, if not GitHub (each release is the directory vVERSION under it). The host you connect to downloads from here too."
         },
-        "remoteMosh.sshPath": {
+        "remoteGosh.sshPath": {
           "type": "string",
           "default": "",
           "description": "The ssh program used to set up a connection. Empty means the one on your PATH."
         },
-        "remoteMosh.serverDownloadUrlTemplate": {
+        "remoteGosh.serverDownloadUrlTemplate": {
           "type": "string",
           "default": "",
           "description": "Where hosts download the editor's server from, if not the editor's own default. May use ${version}, ${release}, ${commit}, ${quality}, ${os} and ${arch}."
         },
-        "remoteMosh.persistentTerminals": {
+        "remoteGosh.persistentTerminals": {
           "type": "string",
           "enum": [
             "off",
@@ -142,7 +143,7 @@
           ],
           "description": "Whether terminals on the host should outlive the editor. Takes effect the next time you connect."
         },
-        "remoteMosh.relay": {
+        "remoteGosh.relay": {
           "type": "string",
           "enum": [
             "auto",
@@ -151,23 +152,23 @@
           ],
           "default": "auto",
           "enumDescriptions": [
-            "Use UDP, as mosh does. If the host does not answer by UDP, carry the session over ssh until it does.",
+            "Use UDP. If the host does not answer by UDP, carry the session over ssh until it does.",
             "Carry the session over ssh from the start and do not use UDP. For a network known to block it.",
             "UDP only."
           ],
-          "description": "What to do when mosh's UDP cannot reach the host, as on a network that carries only TCP. Needs mosh 1.4.0-pf.3 or later at both ends."
+          "description": "What to do when the session's UDP cannot reach the host, as on a network that carries only TCP."
         },
-        "remoteMosh.localCopies.folder": {
+        "remoteGosh.localCopies.folder": {
           "type": "string",
           "default": "",
-          "description": "Where on this machine copies of folders on hosts are kept. Empty means remote-mosh-copies in your home directory. Each is at HOST/path/on/the/host under it."
+          "description": "Where on this machine copies of folders on hosts are kept. Empty means remote-gosh-copies in your home directory. Each is at HOST/path/on/the/host under it."
         },
-        "remoteMosh.localCopies.delete": {
+        "remoteGosh.localCopies.delete": {
           "type": "boolean",
           "default": false,
           "description": "Whether a file removed from a folder on the host is also removed from its copy on this machine. Takes effect the next time you connect."
         },
-        "remoteMosh.localCopies.interval": {
+        "remoteGosh.localCopies.interval": {
           "type": "number",
           "default": 2,
           "minimum": 0.2,

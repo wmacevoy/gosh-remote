@@ -1,3 +1,4 @@
+// Copyright 2026 Warren D. MacEvoy. GPL-3.0-or-later. See github.com/wmacevoy/gosh/LICENSE-GOSH, and LICENSE-MOSH.
 'use strict';
 
 // Builds the shpool that the extension carries for hosts without one,

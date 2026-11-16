@@ -1,15 +1,17 @@
+# Copyright 2026 Warren D. MacEvoy. GPL-3.0-or-later. See github.com/wmacevoy/gosh/LICENSE-GOSH, and LICENSE-MOSH.
+#
 # Run on the remote machine by lib/connect.js, which puts settings above
 # this line.  It makes sure three things are there and running, and
 # reports where they are:
 #
-#   1. this build of mosh (installed into ~/.local/bin if missing),
+#   1. this release of gosh (installed into ~/.local/bin if missing),
 #   2. the editor's server, listening on a loopback port,
-#   3. a mosh session forwarding a port on the user's machine to it.
+#   3. a gosh session forwarding a port on the user's machine to it.
 #
-# Everything it has to say goes on lines of the form  MOSHREMOTE key==value==
+# Everything it has to say goes on lines of the form  GOSHREMOTE key==value==
 # so that whatever a login script prints cannot be mistaken for it.
 
-report() { printf 'MOSHREMOTE %s==%s==\n' "$1" "$2"; }
+report() { printf 'GOSHREMOTE %s==%s==\n' "$1" "$2"; }
 fail() { report error "$*"; exit 1; }
 
 fetch() { # URL FILE
@@ -41,22 +43,26 @@ if [ "$os" = linux ] && grep -qs '^ID=alpine' /etc/os-release; then
 fi
 report platform "$os-$arch"
 
-work=$(mktemp -d 2>/dev/null || mktemp -d -t remote-mosh) || fail "cannot make a temporary directory"
+work=$(mktemp -d 2>/dev/null || mktemp -d -t remote-gosh) || fail "cannot make a temporary directory"
 trap 'rm -rf "$work"' EXIT
 
-# ---- 1. mosh
+# ---- 1. gosh
 
-installed=$(mosh-server --version 2>/dev/null | sed -n '1s/.*(mosh \([^)]*\)).*/\1/p')
-if [ "$installed" != "$MOSH_VERSION" ]; then
-    report status "installing mosh $MOSH_VERSION"
-    fetch "$MOSH_RELEASES/mosh-$MOSH_VERSION/install.sh" "$work/install.sh" \
-        || fail "could not download the mosh installer from $MOSH_RELEASES"
-    MOSH_VERSION="$MOSH_VERSION" MOSH_RELEASES="$MOSH_RELEASES" sh "$work/install.sh" >"$work/install.log" 2>&1 \
-        || fail "installing mosh failed: $(tail -n 3 "$work/install.log" | tr '\n' ' ')"
-    installed=$(mosh-server --version 2>/dev/null | sed -n '1s/.*(mosh \([^)]*\)).*/\1/p')
-    [ "$installed" = "$MOSH_VERSION" ] || fail "mosh $MOSH_VERSION was installed but mosh-server reports '$installed'"
+# gosh's programs report mosh's version, not gosh's, so the release installed here is
+# remembered beside them: installed again when it is not the one asked for.
+marker="$HOME/.local/share/remote-gosh/gosh-version"
+installed=$(cat "$marker" 2>/dev/null)
+if [ "$installed" != "$GOSH_VERSION" ] || ! gosh-server --version >/dev/null 2>&1; then
+    report status "installing gosh $GOSH_VERSION"
+    fetch "$GOSH_RELEASES/v$GOSH_VERSION/install.sh" "$work/install.sh" \
+        || fail "could not download the gosh installer from $GOSH_RELEASES"
+    GOSH_VERSION="$GOSH_VERSION" GOSH_RELEASES="$GOSH_RELEASES" sh "$work/install.sh" >"$work/install.log" 2>&1 \
+        || fail "installing gosh failed: $(tail -n 3 "$work/install.log" | tr '\n' ' ')"
+    gosh-server --version >/dev/null 2>&1 || fail "gosh $GOSH_VERSION was installed but gosh-server does not run"
+    mkdir -p "$(dirname "$marker")" && printf '%s\n' "$GOSH_VERSION" >"$marker"
+    installed=$GOSH_VERSION
 fi
-report mosh "$installed"
+report gosh "$installed"
 
 # ---- 2. the editor's server
 
@@ -113,7 +119,7 @@ report token "$(cat "$tokenfile")"
 # The editor is told to start terminals with a launcher that attaches to
 # a shpool session, through this machine's own settings for it.
 
-launcher="$HOME/.local/bin/remote-mosh-terminal"
+launcher="$HOME/.local/bin/remote-gosh-terminal"
 profile="shpool (persistent)"
 settings="$data/data/Machine/settings.json"
 case "$os" in darwin) settings_os=osx ;; *) settings_os=linux ;; esac
@@ -176,7 +182,7 @@ else
     set_terminals unset
 fi
 
-# ---- 3. a mosh session that forwards to it
+# ---- 3. a gosh session that forwards to it
 
 # It has no terminal to serve, so its command just waits.  Should the
 # user's machine vanish for good, it gives up after a week.
@@ -185,22 +191,22 @@ export MOSH_SERVER_NETWORK_TMOUT
 
 spec="$LOCAL_PORT:127.0.0.1:$port"
 started=
-for locale in "" en_US.UTF-8 C.UTF-8; do # mosh-server insists on a UTF-8 locale
+for locale in "" en_US.UTF-8 C.UTF-8; do # the server insists on a UTF-8 locale
     started=$(
         [ -n "$locale" ] && { LC_ALL=$locale; export LC_ALL; }
-        mosh-server new -s -L "$spec" -- sh -c 'while :; do sleep 86400; done' 2>/dev/null </dev/null
+        gosh-server new -s -L "$spec" -- sh -c 'while :; do sleep 86400; done' 2>/dev/null </dev/null
     ) && case "$started" in *"MOSH CONNECT "*) break ;; esac
     started=
 done
-[ -n "$started" ] || fail "mosh-server would not start on the remote machine"
+[ -n "$started" ] || fail "gosh-server would not start on the remote machine"
 
 set -- $(printf '%s\n' "$started" | sed -n 's/^MOSH CONNECT \([0-9][0-9]*\) \([A-Za-z0-9\/+]*\).*/\1 \2/p')
-[ $# -eq 2 ] || fail "could not understand what mosh-server said"
-report moshPort "$1"
-report moshKey "$2"
+[ $# -eq 2 ] || fail "could not understand what gosh-server said"
+report goshPort "$1"
+report goshKey "$2"
 report spec "$spec"
 
-# The address this machine was reached at is the one to send mosh's datagrams to.
+# The address this machine was reached at is the one to send the session's datagrams to.
 set -- ${SSH_CONNECTION:-}
-report moshAddress "${3:-}"
+report goshAddress "${3:-}"
 report done yes

@@ -1,5 +1,6 @@
 #!/bin/sh
-# Put here by the Remote - Mosh editor extension, which has the editor
+# Copyright 2026 Warren D. MacEvoy. GPL-3.0-or-later. See github.com/wmacevoy/gosh/LICENSE-GOSH, and LICENSE-MOSH.
+# Put here by the Remote - Gosh editor extension, which has the editor
 # start its terminals with this instead of a shell.
 #
 # It attaches the terminal to a shpool session, so that the shell in it
@@ -20,7 +21,7 @@ prefix="editor-$(basename "$PWD" | tr -c 'A-Za-z0-9._\n-' '_')"
 
 # Several terminals can start at the same moment (the editor restores
 # them together), so a name is claimed before it is used.
-claims="${XDG_RUNTIME_DIR:-/tmp}/remote-mosh-terminals-$(id -u)"
+claims="${XDG_RUNTIME_DIR:-/tmp}/remote-gosh-terminals-$(id -u)"
 mkdir -p "$claims" 2>/dev/null
 chmod 700 "$claims" 2>/dev/null
 
@@ -46,7 +47,7 @@ started=$(date +%s)
 shpool attach --dir "$PWD" "$name"
 status=$?
 if [ $status -ne 0 ] && [ $(($(date +%s) - started)) -lt 3 ]; then
-    echo "remote-mosh: shpool would not attach (it said $status); this is an ordinary shell instead." >&2
+    echo "remote-gosh: shpool would not attach (it said $status); this is an ordinary shell instead." >&2
     plain
 fi
 exit $status

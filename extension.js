@@ -1,11 +1,12 @@
+// Copyright 2026 Warren D. MacEvoy. GPL-3.0-or-later. See github.com/wmacevoy/gosh/LICENSE-GOSH, and LICENSE-MOSH.
 'use strict';
 
 // The part that talks to the editor.  The work is in lib/connect.js.
 //
 // A window on a remote machine has an address of the form
-//     vscode-remote://mosh+HOST/path
-// and when the editor opens one it asks whoever registered for "mosh"
-// how to reach HOST.  We answer with a port on this machine, which mosh
+//     vscode-remote://gosh+HOST/path   (REQ6/NAME-1)
+// and when the editor opens one it asks whoever registered for "gosh"
+// how to reach HOST.  We answer with a port on this machine, which gosh
 // forwards to the editor's server on HOST.
 
 const fs = require('fs');
@@ -16,7 +17,7 @@ const vscode = require('vscode');
 const { connect } = require('./lib/connect');
 const { mirror, mirrorDirectory } = require('./lib/mirror');
 
-const AUTHORITY = 'mosh';
+const AUTHORITY = 'gosh';
 
 // The editor lower-cases authorities and is particular about what is in
 // them, so a host that is not plain is spelt out in hexadecimal.
@@ -30,7 +31,7 @@ function decodeHost(encoded) {
 }
 
 function activate(context) {
-    const output = vscode.window.createOutputChannel('Remote - Mosh');
+    const output = vscode.window.createOutputChannel('Remote - Gosh');
     const connections = new Map(); // authority -> connection
     const product = JSON.parse(fs.readFileSync(path.join(vscode.env.appRoot, 'product.json'), 'utf8'));
 
@@ -39,17 +40,17 @@ function activate(context) {
 
     const copies = new Map(); // "host\npath" -> { handle, stopped }
     const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
-    status.command = 'remoteMosh.localCopies';
+    status.command = 'remoteGosh.localCopies';
     context.subscriptions.push(status);
 
-    const copiesRoot = () => vscode.workspace.getConfiguration('remoteMosh').get('localCopies.folder')
-        || path.join(os.homedir(), 'remote-mosh-copies');
+    const copiesRoot = () => vscode.workspace.getConfiguration('remoteGosh').get('localCopies.folder')
+        || path.join(os.homedir(), 'remote-gosh-copies');
     const wantedFor = host => (context.globalState.get('localCopies', {})[host] || []);
 
     function showCopies() {
         const count = copies.size;
         status.text = `$(sync) ${count} local ${count === 1 ? 'copy' : 'copies'}`;
-        status.tooltip = `Remote-Mosh keeps ${count === 1 ? 'a folder' : 'folders'} from the host up to date under ${copiesRoot()}`;
+        status.tooltip = `Remote-Gosh keeps ${count === 1 ? 'a folder' : 'folders'} from the host up to date under ${copiesRoot()}`;
         if (count) {
             status.show();
         } else {
@@ -62,7 +63,7 @@ function activate(context) {
         if (copies.has(key)) {
             return;
         }
-        const settings = vscode.workspace.getConfiguration('remoteMosh');
+        const settings = vscode.workspace.getConfiguration('remoteGosh');
         const localDir = mirrorDirectory(copiesRoot(), host, remotePath);
         const entry = { handle: null, stopped: false };
         copies.set(key, entry);
@@ -90,7 +91,7 @@ function activate(context) {
             localDir,
             remove: settings.get('localCopies.delete'),
             interval: settings.get('localCopies.interval'),
-            moshVersion: settings.get('moshVersion'),
+            goshVersion: settings.get('goshVersion'),
             releases: settings.get('releasesUrl') || undefined,
             sshPath: settings.get('sshPath') || undefined,
             relay: settings.get('relay'),
@@ -105,7 +106,7 @@ function activate(context) {
         }, error => {
             again(error.message);
             if (!entry.stopped) {
-                vscode.window.showWarningMessage(`Remote-Mosh could not copy ${remotePath}: ${error.message}`);
+                vscode.window.showWarningMessage(`Remote-Gosh could not copy ${remotePath}: ${error.message}`);
             }
         });
     }
@@ -155,7 +156,7 @@ function activate(context) {
     async function chooseCopies() {
         const host = windowHost();
         if (!host) {
-            vscode.window.showInformationMessage('Local copies are of folders on a host: open a folder there with Remote-Mosh first.');
+            vscode.window.showInformationMessage('Local copies are of folders on a host: open a folder there with Remote-Gosh first.');
             return;
         }
         // The folders that are open, the folders directly inside them, and whatever is already being copied.
@@ -214,7 +215,7 @@ function activate(context) {
     const resolver = {
         async resolve(authority) {
             const host = decodeHost(authority.slice(authority.indexOf('+') + 1));
-            const settings = vscode.workspace.getConfiguration('remoteMosh');
+            const settings = vscode.workspace.getConfiguration('remoteGosh');
 
             // The editor asks again when it has lost the connection: start afresh.
             const previous = connections.get(authority);
@@ -225,14 +226,14 @@ function activate(context) {
 
             try {
                 const connection = await vscode.window.withProgress(
-                    { location: vscode.ProgressLocation.Notification, title: `Mosh: ${host}` },
+                    { location: vscode.ProgressLocation.Notification, title: `Gosh: ${host}` },
                     progress => connect({
                         host,
                         product: {
                             ...product,
                             serverDownloadUrlTemplate: settings.get('serverDownloadUrlTemplate') || product.serverDownloadUrlTemplate,
                         },
-                        moshVersion: settings.get('moshVersion'),
+                        goshVersion: settings.get('goshVersion'),
                         releases: settings.get('releasesUrl') || undefined,
                         sshPath: settings.get('sshPath') || undefined,
                         persistentTerminals: settings.get('persistentTerminals'),
@@ -246,14 +247,14 @@ function activate(context) {
                     }));
 
                 connections.set(authority, connection);
-                reconcileCopies(host); // (mosh is on the host by now, which they need)
+                reconcileCopies(host); // (gosh is on the host by now, which they need)
                 for (const note of connection.notes) {
                     vscode.window.showWarningMessage(`${host}: ${note}`);
                 }
                 connection.exited.then(code => {
                     if (connections.get(authority) === connection) {
                         connections.delete(authority);
-                        output.appendLine(`The mosh session to ${host} ended (${code}).`);
+                        output.appendLine(`The gosh session to ${host} ended (${code}).`);
                     }
                 });
                 return new vscode.ResolvedAuthority('127.0.0.1', connection.port, connection.token);
@@ -271,7 +272,7 @@ function activate(context) {
         let host;
         if (recent.length) {
             const other = 'Another host...';
-            const picked = await vscode.window.showQuickPick([...recent, other], { placeHolder: 'Connect with mosh to...' });
+            const picked = await vscode.window.showQuickPick([...recent, other], { placeHolder: 'Connect with gosh to...' });
             if (!picked) {
                 return;
             }
@@ -296,12 +297,12 @@ function activate(context) {
 
     context.subscriptions.push(
         output,
-        vscode.commands.registerCommand('remoteMosh.connect', () => open(false)),
-        vscode.commands.registerCommand('remoteMosh.connectCurrentWindow', () => open(true)),
-        vscode.commands.registerCommand('remoteMosh.showLog', () => output.show()),
-        vscode.commands.registerCommand('remoteMosh.localCopies', chooseCopies),
-        vscode.commands.registerCommand('remoteMosh.copyThisFolder', copyThisFolder),
-        vscode.commands.registerCommand('remoteMosh.openLocalCopies',
+        vscode.commands.registerCommand('remoteGosh.connect', () => open(false)),
+        vscode.commands.registerCommand('remoteGosh.connectCurrentWindow', () => open(true)),
+        vscode.commands.registerCommand('remoteGosh.showLog', () => output.show()),
+        vscode.commands.registerCommand('remoteGosh.localCopies', chooseCopies),
+        vscode.commands.registerCommand('remoteGosh.copyThisFolder', copyThisFolder),
+        vscode.commands.registerCommand('remoteGosh.openLocalCopies',
             () => vscode.env.openExternal(vscode.Uri.file(copiesRoot()))),
         { dispose: () => [...copies.keys()].forEach(stopCopy) },
         { dispose: () => connections.forEach(connection => connection.dispose()) });

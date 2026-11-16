@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright 2026 Warren D. MacEvoy. GPL-3.0-or-later. See github.com/wmacevoy/gosh/LICENSE-GOSH, and LICENSE-MOSH.
 """The terminal launcher (lib/terminal.sh) against a real shpool.
 
     python3 test/shpool.test.py PATH_TO_SHPOOL
@@ -21,7 +22,7 @@ os.makedirs(os.path.join(home, ".local", "bin"))
 os.makedirs(workspace)
 os.makedirs(os.path.join(scratch, "r"))
 shutil.copy(shpool, os.path.join(home, ".local", "bin", "shpool"))
-launcher = os.path.join(home, ".local", "bin", "remote-mosh-terminal")
+launcher = os.path.join(home, ".local", "bin", "remote-gosh-terminal")
 shutil.copy(os.path.join(here, "..", "lib", "terminal.sh"), launcher)
 os.chmod(launcher, 0o755)
 env = {"HOME": home, "PATH": "/usr/local/bin:/usr/bin:/bin", "XDG_RUNTIME_DIR": os.path.join(scratch, "r"),
@@ -41,7 +42,7 @@ def terminal():
     if pid == 0:
         fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
         os.chdir(workspace)
-        os.execve(launcher, ["remote-mosh-terminal"], env)
+        os.execve(launcher, ["remote-gosh-terminal"], env)
     return pid, fd
 
 
