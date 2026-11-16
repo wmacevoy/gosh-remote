@@ -93,7 +93,21 @@ try:
     check("and no extra session was made", now == {"editor-work_space-1": "attached", "editor-work_space-2": "attached"}, str(now))
 finally:
     subprocess.run([shpool, "kill", "editor-work_space-1", "editor-work_space-2"], env=env, capture_output=True, timeout=30)
-    subprocess.run(["pkill", "-f", os.path.join(scratch, "r")], capture_output=True)
+    # What is left of this test's own (its shpool daemon, its terminals' shells): by process id, and only
+    # processes whose program or home is under this test's scratch directory. Never by a pattern on
+    # command lines: other sessions on this machine are not the test's (the owner's rule).
+    for pid in (p for p in os.listdir("/proc") if p.isdigit()):
+        try:
+            exe = os.readlink("/proc/%s/exe" % pid)
+            with open("/proc/%s/environ" % pid, "rb") as f:
+                home_of = [v for v in f.read().split(b"\0") if v.startswith(b"HOME=")]
+        except OSError:
+            continue
+        if exe.startswith(scratch + os.sep) or home_of == [("HOME=" + home).encode()]:
+            try:
+                os.kill(int(pid), 15)
+            except OSError:
+                pass
     shutil.rmtree(scratch, ignore_errors=True)
 
 sys.exit(1 if failures else 0)
