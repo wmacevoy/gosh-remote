@@ -1,19 +1,28 @@
+// Copyright 2026 Warren D. MacEvoy. GPL-3.0-or-later. See github.com/wmacevoy/gosh/LICENSE-GOSH, and LICENSE-MOSH.
 'use strict';
 
 // End-to-end test of lib/connect.js, without an editor and without ssh.
 //
 // The "remote machine" is this one, with a throwaway home directory,
 // reached by running the remote script in a local shell rather than
-// over ssh.  Everything else is real: mosh is installed at both "ends"
-// from a release, the editor's actual server is downloaded and started,
-// and a mosh session forwards a port to it.
+// over ssh.  Everything else is real: gosh is installed at both "ends"
+// from a release, the editor's server is started, and a gosh session
+// forwards a port to it.  (REQ1/EXT-1, REQ1/EXT-3, REQ1/EXT-4, REQ6/NAME-1)
 //
-//   MOSH_RELEASES=/path/to/releases MOSH_VERSION=1.4.0-pf.2 \
+//   GOSH_RELEASES=/path/to/releases GOSH_VERSION=0.2 \
 //   SERVER_VERSION=1.143 SERVER_RELEASE=17232 node test/connect.test.js
 //
-// MOSH_RELEASES is a directory holding mosh-VERSION/ with the release's files,
+// GOSH_RELEASES is a directory holding vVERSION/ with the release's files,
 // or the URL releases are published at, to test against the real thing:
-//   MOSH_RELEASES=https://github.com/wmacevoy/mosh/releases/download
+//   GOSH_RELEASES=https://github.com/wmacevoy/gosh/releases/download
+// Or GOSH_BUILD, a gosh checkout with its programs built (tools/build.sh): a
+// release is made here from its .build/bin and tools/install.sh, as gosh's
+// release workflow lays one out, and nothing is downloaded for gosh.
+//
+// EDITOR_SERVER=standin puts a stand-in in place of the editor's real server
+// (which is otherwise downloaded): it says what the real one says when it is
+// listening, and answers /version.  So the editor's server itself is then not
+// tested; everything around it is.
 
 const assert = require('assert');
 const fs = require('fs');
@@ -40,11 +49,11 @@ function get(port, pathname) {
 
 function unitTests() {
     assert.strictEqual(shellQuote("it's"), `'it'\\''s'`);
-    assert.strictEqual(localPackage('1.0', 'linux', 'x64').archive, 'mosh-1.0-linux-x86_64.tar.gz');
-    assert.strictEqual(localPackage('1.0', 'linux', 'arm64').archive, 'mosh-1.0-linux-aarch64.tar.gz');
-    assert.strictEqual(localPackage('1.0', 'darwin', 'arm64').archive, 'mosh-1.0-macos-universal.tar.gz');
-    assert.strictEqual(localPackage('1.0', 'win32', 'x64').archive, 'mosh-1.0-msys2.zip');
-    assert.ok(localPackage('1.0', 'win32', 'x64').client.endsWith('mosh-client.exe'));
+    assert.strictEqual(localPackage('1.0', 'linux', 'x64').archive, 'gosh-1.0-linux-x86_64.tar.gz');
+    assert.strictEqual(localPackage('1.0', 'linux', 'arm64').archive, 'gosh-1.0-linux-aarch64.tar.gz');
+    assert.strictEqual(localPackage('1.0', 'darwin', 'arm64').archive, 'gosh-1.0-macos-universal.tar.gz');
+    assert.ok(localPackage('1.0', 'linux', 'x64').client.endsWith(path.join('bin', 'gosh-client')));
+    assert.throws(() => localPackage('1.0', 'win32', 'x64'), /no gosh client package for win32 on x64 yet/);
     assert.throws(() => localPackage('1.0', 'sunos', 'x64'));
     const script = remoteScript({ A: 'x y', B: "q'q" });
     assert.ok(script.startsWith(`A='x y'\nB='q'\\''q'\n`));
@@ -52,13 +61,13 @@ function unitTests() {
     const typed = remotePowershell({ A: "x'y" });
     assert.strictEqual(typed.split('\r\n').length, 3, 'one line to run, then exit');
     const decoded = Buffer.from(/FromBase64String\('([^']+)'\)/.exec(typed)[1], 'base64').toString('utf8');
-    assert.ok(decoded.startsWith("$A = 'x''y'\n") && decoded.includes('MOSHREMOTE'));
-    const viaSsh = relayCommand('', 'me@host', 'sh', { moshPort: '60001' }, '10.0.0.5');
+    assert.ok(decoded.startsWith("$A = 'x''y'\n") && decoded.includes('GOSHREMOTE'));
+    const viaSsh = relayCommand('', 'me@host', 'sh', { goshPort: '60001' }, '10.0.0.5');
     assert.deepStrictEqual(viaSsh.slice(0, 5), ['ssh', '-T', '-o', 'BatchMode=yes', 'me@host']);
-    assert.ok(viaSsh[5].startsWith("sh -c '") && viaSsh[5].includes('exec mosh-server relay 10.0.0.5 60001'));
-    const win = (server) => relayCommand('C:\\ssh.exe', 'h', 'powershell', { moshPort: '60001', moshServer: server }, '::1');
-    assert.strictEqual(win('C:\\m\\mosh-server.exe')[5], 'C:\\m\\mosh-server.exe relay ::1 60001');
-    assert.strictEqual(win('C:\\a b\\mosh-server.exe')[5], '"C:\\a b\\mosh-server.exe" relay ::1 60001');
+    assert.ok(viaSsh[5].startsWith("sh -c '") && viaSsh[5].includes('exec gosh-server relay 10.0.0.5 60001'));
+    const win = (server) => relayCommand('C:\\ssh.exe', 'h', 'powershell', { goshPort: '60001', goshServer: server }, '::1');
+    assert.strictEqual(win('C:\\g\\gosh-server.exe')[5], 'C:\\g\\gosh-server.exe relay ::1 60001');
+    assert.strictEqual(win('C:\\a b\\gosh-server.exe')[5], '"C:\\a b\\gosh-server.exe" relay ::1 60001');
     assert.strictEqual(win('')  , null);
     assert.strictEqual(mirrorDirectory('/m', 'me@host', '/home/me/proj'), path.join('/m', 'me@host', 'home', 'me', 'proj'));
     assert.strictEqual(mirrorDirectory('/m', 'h', '/'), path.join('/m', 'h', 'root'));
@@ -68,7 +77,7 @@ function unitTests() {
 
 /**
  * A folder on the host kept up to date in one on this machine, by a
- * mosh session of its own (lib/mirror.js).  The host already has mosh,
+ * gosh session of its own (lib/mirror.js).  The host already has gosh,
  * from connecting.
  */
 async function keepsLocalCopies(options, remoteHome, scratch) {
@@ -88,8 +97,8 @@ async function keepsLocalCopies(options, remoteHome, scratch) {
     const lines = [];
     const copying = await mirror({
         host: options.host, remotePath: there, localDir: here, remove: true, interval: 0.3,
-        moshVersion: options.moshVersion, releases: options.releases, storageDir: options.storageDir,
-        runner: options.runner, shell: options.shell, moshAddress: options.moshAddress,
+        goshVersion: options.goshVersion, releases: options.releases, storageDir: options.storageDir,
+        runner: options.runner, shell: options.shell, goshAddress: options.goshAddress,
         log: line => lines.push(line),
     });
     try {
@@ -118,7 +127,7 @@ async function keepsLocalCopies(options, remoteHome, scratch) {
  */
 async function persistentTerminals(options, remoteHome) {
     const settingsFile = path.join(remoteHome, '.vscodium-server', 'data', 'Machine', 'settings.json');
-    const launcher = path.join(remoteHome, '.local', 'bin', 'remote-mosh-terminal');
+    const launcher = path.join(remoteHome, '.local', 'bin', 'remote-gosh-terminal');
     const standIn = path.join(remoteHome, '.local', 'bin', 'shpool');
     const readSettings = () => JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
     const reconnect = async extra => {
@@ -213,44 +222,113 @@ async function persistentTerminals(options, remoteHome) {
     }
 }
 
+/**
+ * A gosh release in a directory, made from a gosh checkout's built programs, laid out as gosh's
+ * release workflow lays one out: vVERSION/gosh-VERSION-OS-ARCH.tar.gz, SHA256SUMS and install.sh.
+ */
+function releaseFromBuild(gosh, version, where) {
+    const { name } = localPackage(version);
+    const out = path.join(where, `v${version}`);
+    const stage = path.join(where, 'stage', name);
+    fs.mkdirSync(path.join(stage, 'bin'), { recursive: true });
+    fs.mkdirSync(out, { recursive: true });
+    for (const program of ['gosh-client', 'gosh-server']) {
+        fs.copyFileSync(path.join(gosh, '.build', 'bin', program), path.join(stage, 'bin', program));
+        fs.chmodSync(path.join(stage, 'bin', program), 0o755);
+    }
+    fs.symlinkSync('gosh-client', path.join(stage, 'bin', 'gosh'));
+    fs.symlinkSync('gosh-client', path.join(stage, 'bin', 'gocp'));
+    const archive = path.join(out, `${name}.tar.gz`);
+    const tar = require('child_process').spawnSync('tar', ['-czf', archive, '-C', path.dirname(stage), name]);
+    assert.strictEqual(tar.status, 0, String(tar.stderr));
+    const digest = require('crypto').createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
+    fs.writeFileSync(path.join(out, 'SHA256SUMS'), `${digest}  ${name}.tar.gz\n`);
+    const installer = fs.readFileSync(path.join(gosh, 'tools', 'install.sh'), 'utf8').replace('@VERSION@', version);
+    fs.writeFileSync(path.join(out, 'install.sh'), installer);
+    return where;
+}
+
+/**
+ * A stand-in for the editor's server, as the tarball the host would download: it says what the
+ * real one says once it is listening, answers /version, and has a node beside it (the host script
+ * rewrites the server's settings with the node the server carries).
+ */
+function standInServer(where) {
+    const top = path.join(where, 'server', 'standin');
+    fs.mkdirSync(path.join(top, 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(top, 'bin', 'codium-server'), [
+        '#!/bin/sh',
+        'exec python3 -c \'',
+        'import http.server, sys',
+        'class H(http.server.BaseHTTPRequestHandler):',
+        '    def do_GET(self):',
+        '        body = b"standin\\n"',
+        '        self.send_response(200 if self.path == "/version" else 404)',
+        '        self.send_header("Content-Length", str(len(body)))',
+        '        self.end_headers()',
+        '        self.wfile.write(body)',
+        '    def log_message(self, *a): pass',
+        's = http.server.HTTPServer(("127.0.0.1", 0), H)',
+        'print("Extension host agent listening on %d" % s.server_port, flush=True)',
+        's.serve_forever()',
+        '\'',
+        '',
+    ].join('\n'));
+    fs.chmodSync(path.join(top, 'bin', 'codium-server'), 0o755);
+    fs.writeFileSync(path.join(top, 'node'), `#!/bin/sh\nexec '${process.execPath}' "$@"\n`);
+    fs.chmodSync(path.join(top, 'node'), 0o755);
+    const archive = path.join(where, 'server.tar.gz');
+    const tar = require('child_process').spawnSync('tar', ['-czf', archive, '-C', path.dirname(top), 'standin']);
+    assert.strictEqual(tar.status, 0, String(tar.stderr));
+    return `file://${archive}`;
+}
+
+/** Stops, by process id, whatever is still running a program under dir: only what this test started there. */
+function stopProgramsUnder(dir) {
+    if (process.platform !== 'linux') {
+        return;
+    }
+    for (const pid of fs.readdirSync('/proc').filter(name => /^\d+$/.test(name))) {
+        let exe;
+        try {
+            exe = fs.readlinkSync(`/proc/${pid}/exe`);
+        } catch (error) {
+            continue;
+        }
+        if (exe.startsWith(dir + path.sep)) {
+            try { process.kill(Number(pid)); } catch (error) { /* gone already */ }
+        }
+    }
+}
+
 async function main() {
     unitTests();
 
-    const releases = process.env.MOSH_RELEASES;
-    if (!releases) {
-        console.log('skip end-to-end test (set MOSH_RELEASES to a directory of mosh releases to run it)');
-        return;
-    }
-    const moshVersion = process.env.MOSH_VERSION || '1.4.0-pf.2';
-
     const windows = process.platform === 'win32';
-    if (windows && !(Number(/-pf\.(\d+)/.exec(moshVersion)?.[1]) >= 2)) {
-        // Before 1.4.0-pf.2 there was no mosh server for Windows, so a Windows
-        // machine could not be the host; only its half as the editor's machine is tested.
-        const storageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'remote-mosh-test-'));
-        try {
-            const client = await ensureLocalClient({
-                version: moshVersion,
-                releases: /^https?:/.test(releases) ? releases : path.resolve(releases),
-                storageDir,
-                log: line => console.log(`     | ${line}`),
-            });
-            assert.ok(fs.existsSync(client));
-            console.log('ok   installs a mosh client that runs on Windows');
-            console.log(`skip the connection test (mosh ${moshVersion} has no server for Windows)`);
-        } finally {
-            fs.rmSync(storageDir, { recursive: true, force: true });
-        }
+    if (windows) {
+        // gosh's releases have no Windows build yet (gosh's release workflow), so neither half runs here.
+        console.log('skip end-to-end test (gosh has no Windows build yet)');
         return;
     }
+    const goshVersion = process.env.GOSH_VERSION || '0.0.test';
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'remote-gosh-test-'));
+    let releases = process.env.GOSH_RELEASES;
+    if (!releases && process.env.GOSH_BUILD) {
+        releases = releaseFromBuild(path.resolve(process.env.GOSH_BUILD), goshVersion, path.join(scratch, 'releases'));
+    }
+    if (!releases) {
+        console.log('skip end-to-end test (set GOSH_BUILD to a built gosh checkout, or GOSH_RELEASES to a directory of releases)');
+        fs.rmSync(scratch, { recursive: true, force: true });
+        return;
+    }
+    const serverUrl = process.env.EDITOR_SERVER === 'standin' ? standInServer(scratch) : undefined;
 
-    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'remote-mosh-test-'));
     const remoteHome = path.join(scratch, 'remote-home');
     fs.mkdirSync(remoteHome);
     const lines = [];
     const options = {
         host: 'pretend-host',
-        moshVersion,
+        goshVersion,
         releases: /^https?:/.test(releases) ? releases : `file://${path.resolve(releases)}`,
         storageDir: path.join(scratch, 'local-storage'),
         product: {
@@ -258,39 +336,31 @@ async function main() {
             release: process.env.SERVER_RELEASE || '17232',
             commit: 'test-commit',
             quality: 'stable',
+            ...(serverUrl ? { serverDownloadUrlTemplate: serverUrl } : {}),
         },
         log: line => { lines.push(line); console.log(`     | ${line}`); },
         // in place of ssh: a shell here, with another home (and a UTF-8 locale, as a login would have)
-        shell: windows ? 'powershell' : 'sh',
-        runner: (host, shell) => (shell === 'powershell'
-            ? spawn('powershell', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', '-'], {
-                stdio: ['pipe', 'pipe', 'pipe'],
-                // (without PSModulePath: one inherited from a newer PowerShell stops this one finding its own commands)
-                env: { ...process.env, PSModulePath: undefined, USERPROFILE: remoteHome,
-                    HOMEDRIVE: path.parse(remoteHome).root.slice(0, 2), HOMEPATH: remoteHome.slice(2),
-                    LOCALAPPDATA: path.join(remoteHome, 'AppData', 'Local') },
-            })
-            : spawn('sh', [], {
-                stdio: ['pipe', 'pipe', 'pipe'],
-                // (a bare PATH: whatever mosh this machine's user has installed is not the host's)
-                env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: remoteHome, LC_ALL: 'C.UTF-8' },
-            })),
-        moshAddress: '127.0.0.1',
+        shell: 'sh',
+        runner: () => spawn('sh', [], {
+            stdio: ['pipe', 'pipe', 'pipe'],
+            // (a bare PATH: whatever gosh or mosh this machine's user has installed is not the host's;
+            // no Internet server is asked anything: GOSH_STUN=none)
+            env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: remoteHome, LC_ALL: 'C.UTF-8', GOSH_STUN: 'none' },
+        }),
+        goshAddress: '127.0.0.1',
     };
 
     let first, second;
     try {
         // from nothing: both installs, a new server, a session
         first = await connect(options);
-        assert.ok(fs.existsSync(path.join(options.storageDir, localPackage(moshVersion).client)), 'client installed locally');
-        assert.ok(fs.existsSync(windows
-            ? path.join(remoteHome, 'AppData', 'Local', 'remote-mosh', `mosh-${moshVersion}-msys2`, 'mosh-server.exe')
-            : path.join(remoteHome, '.local', 'bin', 'mosh-server')), 'server installed remotely');
-        assert.ok(lines.some(l => l.includes('installing mosh')) && lines.some(l => l.includes("installing the editor's server")));
+        assert.ok(fs.existsSync(path.join(options.storageDir, localPackage(goshVersion).client)), 'client installed locally');
+        assert.ok(fs.existsSync(path.join(remoteHome, '.local', 'bin', 'gosh-server')), 'server installed remotely');
+        assert.ok(lines.some(l => l.includes('installing gosh')) && lines.some(l => l.includes("installing the editor's server")));
         assert.ok(/^[0-9a-f]{32}$/.test(first.token), 'a connection token');
-        console.log('ok   connects from nothing, installing mosh at both ends and the editor server');
+        console.log('ok   connects from nothing, installing gosh at both ends and the editor server');
 
-        // the editor's server answers on the local port, through mosh
+        // the editor's server answers on the local port, through gosh
         const version = await get(first.port, '/version');
         assert.strictEqual(version.status, 200);
         assert.ok(version.body.trim().length > 0);
@@ -309,19 +379,19 @@ async function main() {
         // closing one leaves the other
         first.dispose();
         const status = await first.exited;
-        assert.ok(windows || status === 0, 'the mosh client stops cleanly'); // (Windows can only kill it outright)
+        assert.ok(windows || status === 0, 'the gosh client stops cleanly'); // (Windows can only kill it outright)
         await assert.rejects(get(first.port, '/version'));
         assert.strictEqual((await get(second.port, '/version')).status, 200);
         first = null;
-        console.log('ok   closing a connection stops its mosh session and no other');
+        console.log('ok   closing a connection stops its gosh session and no other');
 
         // (Not on Windows.  There, with both ends on one machine and the relay started directly, the
         // relayed session's server ends within a tenth of a second of connecting, and why is not yet
-        // known.  mosh's own tests of the relay pass on Windows; see the README.)
+        // known.  The fork's own tests of the relay passed on Windows.)
         if (!windows) {
             // UDP not getting through: the session is carried over a stream instead (ssh, in
             // real use; here the relay on the "host" is run directly), and found without being told
-            const remoteServer = path.join(remoteHome, '.local', 'bin', 'mosh-server');
+            const remoteServer = path.join(remoteHome, '.local', 'bin', 'gosh-server');
             const relayCommand = (address, port) => [remoteServer, 'relay', address, port];
             assert.strictEqual(second.relayed, false, 'UDP was enough until now');
             let relayed = await connect({ ...options, relay: 'always', relayCommand });
@@ -341,7 +411,7 @@ async function main() {
             lines.length = 0;
             relayed = await connect({ ...options, relayCommand: (address, port, reported) => {
                 const words = relayCommand(address, port);
-                reported.moshPort = String(nobody.address().port);
+                reported.goshPort = String(nobody.address().port);
                 return words;
             } });
             try {
@@ -372,16 +442,12 @@ async function main() {
         }
         try {
             const pid = fs.readFileSync(path.join(remoteHome, '.vscodium-server', '.test-commit.pid'), 'utf8').trim();
-            if (windows) {
-                require('child_process').spawnSync('taskkill', ['/F', '/T', '/PID', pid]);
-                require('child_process').spawnSync('taskkill', ['/F', '/IM', 'mosh-server.exe']);
-            } else {
-                process.kill(Number(pid));
-            }
+            process.kill(Number(pid));
         } catch (error) { /* it never started */ }
-        try {
-            fs.rmSync(scratch, { recursive: true, force: true });
-        } catch (error) { /* Windows will not delete what is still open; the runner is thrown away anyway */ }
+        // (and any gosh-server the test's sessions left: only programs under its own home, by pid,
+        // never by name: other gosh and mosh sessions on this machine are not the test's)
+        stopProgramsUnder(fs.realpathSync(scratch));
+        fs.rmSync(scratch, { recursive: true, force: true });
     }
 }
 

@@ -1,3 +1,4 @@
+# Copyright 2026 Warren D. MacEvoy. GPL-3.0-or-later. See github.com/wmacevoy/gosh/LICENSE-GOSH, and LICENSE-MOSH.
 name: ci
 
 on:
@@ -7,12 +8,14 @@ on:
   pull_request:
   workflow_dispatch:
 
-# The end-to-end test uses the real, published mosh release and the
-# editor's real server.  The "host" is the runner itself, reached by a
-# local shell instead of ssh.
+# The end-to-end test uses a published gosh release and the editor's real
+# server.  The "host" is the runner itself, reached by a local shell instead
+# of ssh.  It needs gosh's release to be one the runner can download: while
+# wmacevoy/gosh is private it cannot, and the end-to-end half fails here; it
+# is run on a machine with gosh built instead (GOSH_BUILD; see the README).
 env:
-  MOSH_RELEASES: https://github.com/wmacevoy/mosh/releases/download
-  MOSH_VERSION: 1.4.0-pf.4
+  GOSH_RELEASES: https://github.com/wmacevoy/gosh/releases/download
+  GOSH_VERSION: "0.2"
 
 jobs:
   test:
@@ -28,8 +31,8 @@ jobs:
 
     - uses: prefix-dev/setup-pixi@v0.8.1
 
-    # Everywhere: the unit tests, and installing the mosh client for this machine.
-    # Not on Windows: the full connection, which needs a host that is not Windows.
+    # Everywhere: the unit tests.  Not on Windows, which gosh has no build for yet:
+    # installing gosh at both ends and the full connection.
     - name: "test"
       run: pixi run test
 
@@ -114,7 +117,7 @@ jobs:
 
     - uses: actions/upload-artifact@v4
       with:
-        name: remote-mosh-vsix
+        name: remote-gosh-vsix
         path: "*.vsix"
         if-no-files-found: error
 
@@ -127,7 +130,7 @@ jobs:
           echo "::error::the tag is $GITHUB_REF_NAME but package.json says v$version"
           exit 1
         fi
-        gh release create "$GITHUB_REF_NAME" *.vsix --title "Remote - Mosh $version" \
-          --notes "Install the .vsix with **Extensions: Install from VSIX...**. See the README for what it needs and how to allow the API it uses. Experimental."
+        gh release create "$GITHUB_REF_NAME" *.vsix --title "Remote - Gosh $version" \
+          --notes "Install the .vsix with **Extensions: Install from VSIX...**. See the README for what it needs and how to allow the API it uses. Experimental, and not independently reviewed."
       env:
         GH_TOKEN: ${{ github.token }}
