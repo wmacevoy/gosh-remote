@@ -22,7 +22,7 @@ os.makedirs(os.path.join(home, ".local", "bin"))
 os.makedirs(workspace)
 os.makedirs(os.path.join(scratch, "r"))
 shutil.copy(shpool, os.path.join(home, ".local", "bin", "shpool"))
-launcher = os.path.join(home, ".local", "bin", "remote-gosh-terminal")
+launcher = os.path.join(home, ".local", "bin", "gosh-remote-terminal")
 shutil.copy(os.path.join(here, "..", "lib", "terminal.sh"), launcher)
 os.chmod(launcher, 0o755)
 env = {"HOME": home, "PATH": "/usr/local/bin:/usr/bin:/bin", "XDG_RUNTIME_DIR": os.path.join(scratch, "r"),
@@ -42,7 +42,7 @@ def terminal():
     if pid == 0:
         fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
         os.chdir(workspace)
-        os.execve(launcher, ["remote-gosh-terminal"], env)
+        os.execve(launcher, ["gosh-remote-terminal"], env)
     return pid, fd
 
 

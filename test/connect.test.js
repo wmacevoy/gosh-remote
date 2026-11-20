@@ -240,7 +240,7 @@ async function keepsLocalCopies(options, remoteHome, scratch) {
  */
 async function persistentTerminals(options, remoteHome) {
     const settingsFile = path.join(remoteHome, '.vscodium-server', 'data', 'Machine', 'settings.json');
-    const launcher = path.join(remoteHome, '.local', 'bin', 'remote-gosh-terminal');
+    const launcher = path.join(remoteHome, '.local', 'bin', 'gosh-remote-terminal');
     const standIn = path.join(remoteHome, '.local', 'bin', 'shpool');
     const readSettings = () => JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
     const reconnect = async extra => {
@@ -321,7 +321,7 @@ async function persistentTerminals(options, remoteHome) {
     };
     const borrowed = path.join(remoteHome, 'borrowed-run');
     fs.mkdirSync(path.join(borrowed, 'elsewhere'), { recursive: true });
-    fs.symlinkSync(path.join(borrowed, 'elsewhere'), path.join(borrowed, `remote-gosh-terminals-${process.getuid()}`));
+    fs.symlinkSync(path.join(borrowed, 'elsewhere'), path.join(borrowed, `gosh-remote-terminals-${process.getuid()}`));
     let ran = launchPlain(borrowed);
     assert.ok(ran.plain && !ran.attached, `a claims directory that is a link elsewhere is not used: ${ran.stderr}`);
     const full = Array.from({ length: 64 }, (_, i) => `editor-my_project-${i + 1}\t2026-01-01T00:00:00+00:00\tattached`).join('\n');
@@ -445,7 +445,7 @@ function stopProgramsUnder(dir) {
 
 async function main() {
     unitTests();
-    const reviewScratch = fs.mkdtempSync(path.join(os.tmpdir(), 'remote-gosh-review-'));
+    const reviewScratch = fs.mkdtempSync(path.join(os.tmpdir(), 'gosh-remote-review-'));
     try {
         await reviewTests(reviewScratch);
     } finally {
@@ -463,7 +463,7 @@ async function main() {
         && /of gosh v(\S+)/.exec(require('child_process').spawnSync(path.join(path.resolve(process.env.GOSH_BUILD), '.build', 'bin', 'gosh-client'),
             ['--version'], { encoding: 'utf8' }).stdout || '');
     const goshVersion = process.env.GOSH_VERSION || (built ? built[1] : '0.0.test');
-    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'remote-gosh-test-'));
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'gosh-remote-test-'));
     let releases = process.env.GOSH_RELEASES;
     if (!releases && process.env.GOSH_BUILD) {
         releases = releaseFromBuild(path.resolve(process.env.GOSH_BUILD), goshVersion, path.join(scratch, 'releases'));

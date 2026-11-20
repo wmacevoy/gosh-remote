@@ -117,7 +117,7 @@ jobs:
 
     - uses: actions/upload-artifact@v4
       with:
-        name: remote-gosh-vsix
+        name: gosh-remote-vsix
         path: "*.vsix"
         if-no-files-found: error
 
@@ -130,7 +130,7 @@ jobs:
           echo "::error::the tag is $GITHUB_REF_NAME but package.json says v$version"
           exit 1
         fi
-        gh release create "$GITHUB_REF_NAME" *.vsix --title "Remote - Gosh $version" \
+        gh release create "$GITHUB_REF_NAME" *.vsix --title "Gosh - Remote $version" \
           --notes "Install the .vsix with **Extensions: Install from VSIX...**. See the README for what it needs and how to allow the API it uses. Experimental, and not independently reviewed."
       env:
         GH_TOKEN: ${{ github.token }}

@@ -59,7 +59,7 @@ if [ "$os" = linux ] && grep -qs '^ID=alpine' /etc/os-release; then
 fi
 report platform "$os-$arch"
 
-work=$(mktemp -d 2>/dev/null || mktemp -d -t remote-gosh) || fail "cannot make a temporary directory"
+work=$(mktemp -d 2>/dev/null || mktemp -d -t gosh-remote) || fail "cannot make a temporary directory"
 trap 'rm -rf "$work"' EXIT
 
 # ---- 1. gosh
@@ -148,7 +148,7 @@ report token "$(cat "$tokenfile")"
 # The editor is told to start terminals with a launcher that attaches to
 # a shpool session, through this machine's own settings for it.
 
-launcher="$HOME/.local/bin/remote-gosh-terminal"
+launcher="$HOME/.local/bin/gosh-remote-terminal"
 profile="shpool (persistent)"
 settings="$data/data/Machine/settings.json"
 case "$os" in darwin) settings_os=osx ;; *) settings_os=linux ;; esac

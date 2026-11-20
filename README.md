@@ -1,4 +1,4 @@
-# Remote - Gosh
+# Gosh - Remote
 
 Work on a remote machine from VSCodium over [gosh](https://wmacevoy.github.io/gosh/), so that the
 connection survives changing networks, closing the laptop, and outages.
@@ -55,7 +55,7 @@ Remote extensions rely on an editor API that is not yet declared stable, so the 
 told this one may use it. Run **Preferences: Configure Runtime Arguments** and add:
 
 ```json
-"enable-proposed-api": ["wmacevoy.remote-gosh"]
+"enable-proposed-api": ["wmacevoy.gosh-remote"]
 ```
 
 then restart the editor.
@@ -68,52 +68,52 @@ extension carries one; `pixi run vsix` builds one from a checkout.
 Or, to try it from a checkout with no packaging:
 
 ```
-codium --extensionDevelopmentPath=/path/to/remote-gosh --enable-proposed-api wmacevoy.remote-gosh
+codium --extensionDevelopmentPath=/path/to/gosh-remote --enable-proposed-api wmacevoy.gosh-remote
 ```
 
 ## Using it
 
-Run **Remote-Gosh: Connect to Host...** from the command palette, or from the remote indicator in
+Run **Gosh-Remote: Connect to Host...** from the command palette, or from the remote indicator in
 the bottom-left corner, and give the host as you would give it to ssh: `user@host`, or a name from
 your `~/.ssh/config`. A new window opens on that host (its address is `gosh+HOST`). The first
 connection to a host takes a while, because it downloads gosh and the editor's server there.
 
-**Remote-Gosh: Show Log** shows what it did and what went wrong.
+**Gosh-Remote: Show Log** shows what it did and what went wrong.
 
 ### Settings
 
-- `remoteGosh.goshVersion`: the gosh release to use at both ends (default `0.2`).
-- `remoteGosh.releasesUrl`: where to download gosh from, if not GitHub (each release is the
+- `goshRemote.goshVersion`: the gosh release to use at both ends (default `0.2`).
+- `goshRemote.releasesUrl`: where to download gosh from, if not GitHub (each release is the
   directory `vVERSION` under it). By https only, or a directory on your machine.
-- `remoteGosh.sshPath`: the ssh program, if not the one on your `PATH`.
-- `remoteGosh.serverDownloadUrlTemplate`: where hosts get the editor's server.
-- `remoteGosh.persistentTerminals`: `off` (the default) or `shpool`; see below.
-- `remoteGosh.relay`: `auto` (the default), `always` or `never`; see below.
-- `remoteGosh.localCopies.folder`, `.delete`, `.interval`: see below.
+- `goshRemote.sshPath`: the ssh program, if not the one on your `PATH`.
+- `goshRemote.serverDownloadUrlTemplate`: where hosts get the editor's server.
+- `goshRemote.persistentTerminals`: `off` (the default) or `shpool`; see below.
+- `goshRemote.relay`: `auto` (the default), `always` or `never`; see below.
+- `goshRemote.localCopies.folder`, `.delete`, `.interval`: see below.
 
 ### Local copies of folders (`REQ1/EXT-4`)
 
 The extension can keep chosen folders on the host copied to your machine, and up to date, for as
-long as a window is connected: **Remote-Gosh: Choose Folders to Keep a Local Copy Of...**, or
+long as a window is connected: **Gosh-Remote: Choose Folders to Keep a Local Copy Of...**, or
 right-click a folder and **Keep a Local Copy of This Folder**. Each goes to
-`remote-gosh-copies/HOST/path/on/the/host` in your home directory. The copying is a gosh session
+`gosh-remote-copies/HOST/path/on/the/host` in your home directory. The copying is a gosh session
 of its own (`gocp --auto`), so it carries on through changes of network and sleep, and after an
 interruption sends only what is missing.
 
 It goes **one way**, from the host to your machine: an edit to the copy is replaced the next time
 the file changes on the host. Files removed on the host stay in the copy unless
-`remoteGosh.localCopies.delete` is on. Not available for Windows hosts.
+`goshRemote.localCopies.delete` is on. Not available for Windows hosts.
 
 ### When UDP is blocked
 
 When the host does not answer by UDP, the gosh client opens another ssh connection and carries the
 session through it, by itself: three seconds into a connection getting no answer, or ten seconds
-into a silence later on. It goes back to UDP when UDP works again. `remoteGosh.relay` set to
+into a silence later on. It goes back to UDP when UDP works again. `goshRemote.relay` set to
 `always` uses ssh from the start, and `never` is UDP only.
 
 ### Terminals that outlive the editor (`REQ1/EXT-3`)
 
-Set `remoteGosh.persistentTerminals` to `shpool` and the terminals on the host are
+Set `goshRemote.persistentTerminals` to `shpool` and the terminals on the host are
 [shpool](https://github.com/shell-pool/shpool) sessions: quit the editor, come back tomorrow, open a
 terminal, and you are back in the shell you left. From any login to the host, `shpool list` shows
 them and `shpool attach NAME` joins one. A host with no shpool of its own is given the one the
@@ -127,9 +127,9 @@ extension carries (0.11.6, built unmodified from crates.io; Apache-2.0, its lice
   host's firewall, and check `ssh -o BatchMode=yes HOST true`.
 - **"Could not set up HOST: ... installing gosh failed"**: the host could not fetch gosh's release.
   While `wmacevoy/gosh` is private its releases cannot be downloaded without a login; set
-  `remoteGosh.releasesUrl` to a copy of them that the host can reach.
+  `goshRemote.releasesUrl` to a copy of them that the host can reach.
 - **It connects, but only after a few seconds' wait every time**: UDP is blocked; set
-  `remoteGosh.relay` to `always`.
+  `goshRemote.relay` to `always`.
 
 ## What has and has not been tested
 

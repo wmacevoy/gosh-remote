@@ -42,7 +42,7 @@ try {
     if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') { Fail "Windows hosts with a $($env:PROCESSOR_ARCHITECTURE) processor are not supported" }
     Report 'platform' 'win32-x64'
 
-    $root = Join-Path $env:LOCALAPPDATA 'remote-gosh'
+    $root = Join-Path $env:LOCALAPPDATA 'gosh-remote'
     $work = Join-Path $root ("work-" + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Force -Path $work | Out-Null
 

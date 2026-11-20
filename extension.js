@@ -31,7 +31,7 @@ function decodeHost(encoded) {
 }
 
 function activate(context) {
-    const output = vscode.window.createOutputChannel('Remote - Gosh');
+    const output = vscode.window.createOutputChannel('Gosh - Remote');
     const connections = new Map(); // authority -> connection
     const product = JSON.parse(fs.readFileSync(path.join(vscode.env.appRoot, 'product.json'), 'utf8'));
 
@@ -40,17 +40,17 @@ function activate(context) {
 
     const copies = new Map(); // "host\npath" -> { handle, stopped }
     const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
-    status.command = 'remoteGosh.localCopies';
+    status.command = 'goshRemote.localCopies';
     context.subscriptions.push(status);
 
-    const copiesRoot = () => vscode.workspace.getConfiguration('remoteGosh').get('localCopies.folder')
-        || path.join(os.homedir(), 'remote-gosh-copies');
+    const copiesRoot = () => vscode.workspace.getConfiguration('goshRemote').get('localCopies.folder')
+        || path.join(os.homedir(), 'gosh-remote-copies');
     const wantedFor = host => (context.globalState.get('localCopies', {})[host] || []);
 
     function showCopies() {
         const count = copies.size;
         status.text = `$(sync) ${count} local ${count === 1 ? 'copy' : 'copies'}`;
-        status.tooltip = `Remote-Gosh keeps ${count === 1 ? 'a folder' : 'folders'} from the host up to date under ${copiesRoot()}`;
+        status.tooltip = `Gosh-Remote keeps ${count === 1 ? 'a folder' : 'folders'} from the host up to date under ${copiesRoot()}`;
         if (count) {
             status.show();
         } else {
@@ -63,7 +63,7 @@ function activate(context) {
         if (copies.has(key)) {
             return;
         }
-        const settings = vscode.workspace.getConfiguration('remoteGosh');
+        const settings = vscode.workspace.getConfiguration('goshRemote');
         const localDir = mirrorDirectory(copiesRoot(), host, remotePath);
         const entry = { handle: null, stopped: false };
         copies.set(key, entry);
@@ -106,7 +106,7 @@ function activate(context) {
         }, error => {
             again(error.message);
             if (!entry.stopped) {
-                vscode.window.showWarningMessage(`Remote-Gosh could not copy ${remotePath}: ${error.message}`);
+                vscode.window.showWarningMessage(`Gosh-Remote could not copy ${remotePath}: ${error.message}`);
             }
         });
     }
@@ -156,7 +156,7 @@ function activate(context) {
     async function chooseCopies() {
         const host = windowHost();
         if (!host) {
-            vscode.window.showInformationMessage('Local copies are of folders on a host: open a folder there with Remote-Gosh first.');
+            vscode.window.showInformationMessage('Local copies are of folders on a host: open a folder there with Gosh-Remote first.');
             return;
         }
         // The folders that are open, the folders directly inside them, and whatever is already being copied.
@@ -215,7 +215,7 @@ function activate(context) {
     const resolver = {
         async resolve(authority) {
             const host = decodeHost(authority.slice(authority.indexOf('+') + 1));
-            const settings = vscode.workspace.getConfiguration('remoteGosh');
+            const settings = vscode.workspace.getConfiguration('goshRemote');
 
             // The editor asks again when it has lost the connection: start afresh.
             const previous = connections.get(authority);
@@ -297,12 +297,12 @@ function activate(context) {
 
     context.subscriptions.push(
         output,
-        vscode.commands.registerCommand('remoteGosh.connect', () => open(false)),
-        vscode.commands.registerCommand('remoteGosh.connectCurrentWindow', () => open(true)),
-        vscode.commands.registerCommand('remoteGosh.showLog', () => output.show()),
-        vscode.commands.registerCommand('remoteGosh.localCopies', chooseCopies),
-        vscode.commands.registerCommand('remoteGosh.copyThisFolder', copyThisFolder),
-        vscode.commands.registerCommand('remoteGosh.openLocalCopies',
+        vscode.commands.registerCommand('goshRemote.connect', () => open(false)),
+        vscode.commands.registerCommand('goshRemote.connectCurrentWindow', () => open(true)),
+        vscode.commands.registerCommand('goshRemote.showLog', () => output.show()),
+        vscode.commands.registerCommand('goshRemote.localCopies', chooseCopies),
+        vscode.commands.registerCommand('goshRemote.copyThisFolder', copyThisFolder),
+        vscode.commands.registerCommand('goshRemote.openLocalCopies',
             () => vscode.env.openExternal(vscode.Uri.file(copiesRoot()))),
         { dispose: () => [...copies.keys()].forEach(stopCopy) },
         { dispose: () => connections.forEach(connection => connection.dispose()) });

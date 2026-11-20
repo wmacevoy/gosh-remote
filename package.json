@@ -1,13 +1,13 @@
 {
-  "name": "remote-gosh",
-  "displayName": "Remote - Gosh",
+  "name": "gosh-remote",
+  "displayName": "Gosh - Remote",
   "description": "Work on a remote machine over gosh: the connection survives changing networks, sleep, and outages. Not independently reviewed.",
   "version": "0.1.0",
   "publisher": "wmacevoy",
   "license": "GPL-3.0-or-later",
   "repository": {
     "type": "git",
-    "url": "https://github.com/wmacevoy/remote-gosh"
+    "url": "https://github.com/wmacevoy/gosh-remote"
   },
   "engines": {
     "vscode": "^1.75.0"
@@ -35,62 +35,62 @@
   "contributes": {
     "commands": [
       {
-        "command": "remoteGosh.connect",
+        "command": "goshRemote.connect",
         "title": "Connect to Host...",
-        "category": "Remote-Gosh"
+        "category": "Gosh-Remote"
       },
       {
-        "command": "remoteGosh.connectCurrentWindow",
+        "command": "goshRemote.connectCurrentWindow",
         "title": "Connect Current Window to Host...",
-        "category": "Remote-Gosh"
+        "category": "Gosh-Remote"
       },
       {
-        "command": "remoteGosh.showLog",
+        "command": "goshRemote.showLog",
         "title": "Show Log",
-        "category": "Remote-Gosh"
+        "category": "Gosh-Remote"
       },
       {
-        "command": "remoteGosh.localCopies",
+        "command": "goshRemote.localCopies",
         "title": "Choose Folders to Keep a Local Copy Of...",
-        "category": "Remote-Gosh"
+        "category": "Gosh-Remote"
       },
       {
-        "command": "remoteGosh.copyThisFolder",
+        "command": "goshRemote.copyThisFolder",
         "title": "Keep a Local Copy of This Folder",
-        "category": "Remote-Gosh"
+        "category": "Gosh-Remote"
       },
       {
-        "command": "remoteGosh.openLocalCopies",
+        "command": "goshRemote.openLocalCopies",
         "title": "Open the Folder of Local Copies",
-        "category": "Remote-Gosh"
+        "category": "Gosh-Remote"
       }
     ],
     "menus": {
       "statusBar/remoteIndicator": [
         {
-          "command": "remoteGosh.connect",
+          "command": "goshRemote.connect",
           "group": "remote_30_gosh@1"
         },
         {
-          "command": "remoteGosh.connectCurrentWindow",
+          "command": "goshRemote.connectCurrentWindow",
           "group": "remote_30_gosh@2"
         },
         {
-          "command": "remoteGosh.showLog",
+          "command": "goshRemote.showLog",
           "when": "remoteName == gosh",
           "group": "remote_30_gosh@3"
         }
       ],
       "explorer/context": [
         {
-          "command": "remoteGosh.copyThisFolder",
+          "command": "goshRemote.copyThisFolder",
           "when": "explorerResourceIsFolder && resourceScheme == vscode-remote && remoteName == gosh",
           "group": "7_modification@9"
         }
       ],
       "commandPalette": [
         {
-          "command": "remoteGosh.copyThisFolder",
+          "command": "goshRemote.copyThisFolder",
           "when": "false"
         }
       ]
@@ -108,29 +108,29 @@
       }
     ],
     "configuration": {
-      "title": "Remote - Gosh",
+      "title": "Gosh - Remote",
       "properties": {
-        "remoteGosh.goshVersion": {
+        "goshRemote.goshVersion": {
           "type": "string",
           "default": "0.2",
           "description": "The release of gosh to use. It is installed on this machine and on each host you connect to, from gosh's releases (tag vVERSION)."
         },
-        "remoteGosh.releasesUrl": {
+        "goshRemote.releasesUrl": {
           "type": "string",
           "default": "",
           "description": "Where gosh releases are downloaded from, if not GitHub (each release is the directory vVERSION under it). The host you connect to downloads from here too."
         },
-        "remoteGosh.sshPath": {
+        "goshRemote.sshPath": {
           "type": "string",
           "default": "",
           "description": "The ssh program used to set up a connection. Empty means the one on your PATH."
         },
-        "remoteGosh.serverDownloadUrlTemplate": {
+        "goshRemote.serverDownloadUrlTemplate": {
           "type": "string",
           "default": "",
           "description": "Where hosts download the editor's server from, if not the editor's own default. May use ${version}, ${release}, ${commit}, ${quality}, ${os} and ${arch}."
         },
-        "remoteGosh.persistentTerminals": {
+        "goshRemote.persistentTerminals": {
           "type": "string",
           "enum": [
             "off",
@@ -143,7 +143,7 @@
           ],
           "description": "Whether terminals on the host should outlive the editor. Takes effect the next time you connect."
         },
-        "remoteGosh.relay": {
+        "goshRemote.relay": {
           "type": "string",
           "enum": [
             "auto",
@@ -158,17 +158,17 @@
           ],
           "description": "What to do when the session's UDP cannot reach the host, as on a network that carries only TCP."
         },
-        "remoteGosh.localCopies.folder": {
+        "goshRemote.localCopies.folder": {
           "type": "string",
           "default": "",
-          "description": "Where on this machine copies of folders on hosts are kept. Empty means remote-gosh-copies in your home directory. Each is at HOST/path/on/the/host under it."
+          "description": "Where on this machine copies of folders on hosts are kept. Empty means gosh-remote-copies in your home directory. Each is at HOST/path/on/the/host under it."
         },
-        "remoteGosh.localCopies.delete": {
+        "goshRemote.localCopies.delete": {
           "type": "boolean",
           "default": false,
           "description": "Whether a file removed from a folder on the host is also removed from its copy on this machine. Takes effect the next time you connect."
         },
-        "remoteGosh.localCopies.interval": {
+        "goshRemote.localCopies.interval": {
           "type": "number",
           "default": 2,
           "minimum": 0.2,
