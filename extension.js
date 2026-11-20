@@ -16,6 +16,7 @@ const vscode = require('vscode');
 
 const { connect } = require('./lib/connect');
 const { mirror, mirrorDirectory } = require('./lib/mirror');
+const pool = require('./lib/sessions');
 
 const AUTHORITY = 'gosh';
 
@@ -267,6 +268,232 @@ function activate(context) {
     };
     context.subscriptions.push(vscode.workspace.registerRemoteAuthorityResolver(AUTHORITY, resolver));
 
+    // ---- Pool terminals: the host's shpool sessions (lib/sessions.js; gosh-remote #3).  A terminal
+    // can be attached to any of them, and the one a terminal is in renamed or detached.
+
+    /** The host of this window, if it is one of ours, with or without a folder open. */
+    function remoteHost() {
+        const authority = vscode.env.remoteAuthority;
+        if (authority && authority.startsWith(`${AUTHORITY}+`)) {
+            return decodeHost(authority.slice(AUTHORITY.length + 1));
+        }
+        return windowHost();
+    }
+
+    function poolOptions(host) {
+        return {
+            host,
+            sshPath: vscode.workspace.getConfiguration('goshRemote').get('sshPath') || undefined,
+            log: line => output.appendLine(line),
+        };
+    }
+
+    /** The host's sessions, and the session the active terminal is in; undefined if not to be had. */
+    async function poolHere() {
+        const host = remoteHost();
+        if (!host) {
+            vscode.window.showInformationMessage('Pool terminals are shpool sessions on a host: connect to one with Gosh-Remote first.');
+            return undefined;
+        }
+        try {
+            const list = await vscode.window.withProgress(
+                { location: vscode.ProgressLocation.Window, title: `shpool sessions on ${host}` },
+                () => pool.listSessions(poolOptions(host)));
+            const active = vscode.window.activeTerminal;
+            const pid = active ? await active.processId : undefined;
+            return { host, list, active, current: pool.sessionOfTerminal(list, pid) };
+        } catch (error) {
+            output.appendLine(`Could not list the shpool sessions on ${host}: ${error.message}`);
+            vscode.window.showErrorMessage(`Could not list the shpool sessions on ${host}: ${error.message}`);
+            return undefined;
+        }
+    }
+
+    function ago(ms) {
+        if (!ms) {
+            return '';
+        }
+        const minutes = Math.max(0, Math.round((Date.now() - ms) / 60000));
+        if (minutes < 60) {
+            return `started ${minutes} min ago`;
+        }
+        const hours = Math.round(minutes / 60);
+        return hours < 48 ? `started ${hours} h ago` : `started ${Math.round(hours / 24)} days ago`;
+    }
+
+    function sessionItem(session, here) {
+        const state = here.current === session ? 'this terminal'
+            : session.attached ? 'attached elsewhere' : 'not attached';
+        return { label: session.name, description: state, detail: ago(session.startedAt), session };
+    }
+
+    /** The terminals of this window that are in a session, found by their launcher's pid. */
+    async function terminalsOf(session) {
+        const found = [];
+        for (const terminal of vscode.window.terminals) {
+            if (session.terminals.includes(await terminal.processId)) {
+                found.push(terminal);
+            }
+        }
+        return found;
+    }
+
+    function nameCheck(list, except) {
+        return value => {
+            try {
+                pool.checkSessionName(value);
+            } catch (error) {
+                return error.message;
+            }
+            return value !== except && list.sessions.some(s => s.name === value) ? `There is already a session called ${value}.` : undefined;
+        };
+    }
+
+    async function attachSession() {
+        const here = await poolHere();
+        if (!here) {
+            return;
+        }
+        const { host, list } = here;
+        if (!list.launcher) {
+            vscode.window.showWarningMessage(`${host} has no terminal launcher: set goshRemote.persistentTerminals to shpool and connect again.`);
+            return;
+        }
+        const order = s => (s === here.current ? 2 : s.attached ? 1 : 0); // free ones first
+        const items = [...list.sessions].sort((a, b) => order(a) - order(b) || a.name.localeCompare(b.name))
+            .map(s => sessionItem(s, here));
+        items.push({ label: '$(add) New session...', alwaysShow: true });
+        const picked = await vscode.window.showQuickPick(items, {
+            title: `Attach a terminal to a shpool session on ${host}`,
+            placeHolder: list.sessions.length ? 'A session keeps its shell, and whatever runs in it, when its terminal goes' : 'No sessions yet',
+        });
+        if (!picked) {
+            return;
+        }
+        let name;
+        let force = false;
+        if (picked.session) {
+            name = picked.session.name;
+            if (picked.session === here.current) {
+                here.active.show();
+                return;
+            }
+            if (picked.session.attached) {
+                const mine = await terminalsOf(picked.session);
+                if (mine.length) {
+                    mine[0].show(); // already in a terminal of this window
+                    return;
+                }
+                const take = 'Take It Over';
+                const answer = await vscode.window.showWarningMessage(
+                    `${name} is attached to a terminal elsewhere (another window, or one that has gone). Attach it here instead? It is detached there.`,
+                    { modal: true }, take);
+                if (answer !== take) {
+                    return;
+                }
+                force = true;
+            }
+        } else {
+            name = await vscode.window.showInputBox({
+                title: `A new shpool session on ${host}`,
+                prompt: 'Its name',
+                validateInput: nameCheck(list),
+            });
+            if (!name) {
+                return;
+            }
+        }
+        const folder = (vscode.workspace.workspaceFolders || []).find(f => f.uri.scheme === 'vscode-remote');
+        const terminal = vscode.window.createTerminal({
+            name,
+            ...pool.attachTerminal(list, name, force),
+            cwd: folder ? folder.uri : undefined,
+            iconPath: new vscode.ThemeIcon('terminal-tmux'),
+        });
+        terminal.show();
+    }
+
+    async function renameSession() {
+        const here = await poolHere();
+        if (!here) {
+            return;
+        }
+        const { host, list } = here;
+        if (!list.rename) {
+            vscode.window.showWarningMessage(`The shpool on ${host} cannot rename sessions: that needs gosh-shpool (0.11.7-gosh.1 or later), https://github.com/wmacevoy/gosh-shpool.`);
+            return;
+        }
+        let session = here.current;
+        if (!session) {
+            if (!list.sessions.length) {
+                vscode.window.showInformationMessage(`There are no shpool sessions on ${host}.`);
+                return;
+            }
+            const picked = await vscode.window.showQuickPick(list.sessions.map(s => sessionItem(s, here)),
+                { title: `Rename a shpool session on ${host}` });
+            if (!picked) {
+                return;
+            }
+            session = picked.session;
+        }
+        const name = await vscode.window.showInputBox({
+            title: `Rename ${session.name}`,
+            prompt: 'Its new name. A renamed session is attached only when asked for (Attach Terminal to Session...), not by a new terminal by itself.',
+            value: session.name,
+            validateInput: nameCheck(list, session.name),
+        });
+        if (!name || name === session.name) {
+            return;
+        }
+        try {
+            await pool.renameSession(poolOptions(host), session.name, name);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Could not rename ${session.name}: ${error.message}`);
+            return;
+        }
+        // The terminals showing it take its name.  The editor renames only the active terminal.
+        const terminals = session === here.current ? [here.active] : await terminalsOf(session);
+        for (const terminal of terminals) {
+            terminal.show(true);
+            await vscode.commands.executeCommand('workbench.action.terminal.renameWithArg', { name });
+        }
+        if (here.active && !terminals.includes(here.active)) {
+            here.active.show(true);
+        }
+    }
+
+    async function detachSession() {
+        const here = await poolHere();
+        if (!here) {
+            return;
+        }
+        const { host, list } = here;
+        let session = here.current;
+        if (!session) {
+            const attached = list.sessions.filter(s => s.attached);
+            if (!attached.length) {
+                vscode.window.showInformationMessage(`No shpool session on ${host} is attached.`);
+                return;
+            }
+            const picked = await vscode.window.showQuickPick(attached.map(s => sessionItem(s, here)), {
+                title: `Detach a shpool session on ${host}`,
+                placeHolder: 'Its terminal closes; the shell keeps running, to be attached again',
+            });
+            if (!picked) {
+                return;
+            }
+            session = picked.session;
+        }
+        try {
+            await pool.detachSession(poolOptions(host), session.name);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Could not detach ${session.name}: ${error.message}`);
+            return;
+        }
+        vscode.window.showInformationMessage(
+            `${session.name} is detached: its shell keeps running. Attach Terminal to Session... brings it back.`);
+    }
+
     async function open(reuseWindow) {
         const recent = context.globalState.get('hosts', []);
         let host;
@@ -304,6 +531,9 @@ function activate(context) {
         vscode.commands.registerCommand('goshRemote.copyThisFolder', copyThisFolder),
         vscode.commands.registerCommand('goshRemote.openLocalCopies',
             () => vscode.env.openExternal(vscode.Uri.file(copiesRoot()))),
+        vscode.commands.registerCommand('goshRemote.attachSession', attachSession),
+        vscode.commands.registerCommand('goshRemote.renameSession', renameSession),
+        vscode.commands.registerCommand('goshRemote.detachSession', detachSession),
         { dispose: () => [...copies.keys()].forEach(stopCopy) },
         { dispose: () => connections.forEach(connection => connection.dispose()) });
 }

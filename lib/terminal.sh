@@ -10,11 +10,42 @@
 # to, which is how reopening the editor finds the shells it left.
 #
 # From any other login:   shpool list;  shpool attach editor-NAME-1
+#
+#   gosh-remote-terminal --attach NAME [--force]
+# attaches to that session instead (made if there is none), taking it
+# from whatever has it with --force.  The extension's "Attach Terminal to
+# Session..." opens terminals this way (gosh-remote #3).  A session given
+# a name of its own (renamed) is not taken by a new terminal by itself:
+# only this way, or by "shpool attach" from a login.
 
 PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 export PATH
 
 plain() { exec "${SHELL:-/bin/sh}" -l; }
+
+if [ "${1:-}" = --attach ]; then
+    name=${2:-}
+    force=
+    [ "${3:-}" = --force ] && force=-f
+    case $name in
+        ''|-*|*[!A-Za-z0-9._:@+=-]*)
+            echo "gosh-remote: '$name' is not a session name." >&2
+            exit 2 ;;
+    esac
+    command -v shpool >/dev/null 2>&1 || { echo "gosh-remote: shpool is not on this host." >&2; exit 1; }
+    started=$(date +%s)
+    shpool attach $force --dir "$PWD" "$name"
+    status=$?
+    # Back within seconds: it did not attach.  (shpool says why, but exits 0 for a session another
+    # terminal has.)  No ordinary shell instead: this terminal was asked for that session, and why
+    # it has not got it should stay on screen.
+    if [ $(($(date +%s) - started)) -lt 3 ]; then
+        printf 'gosh-remote: shpool did not attach to %s (it said %s). Press Enter to close. ' "$name" "$status" >&2
+        read -r _
+    fi
+    exit $status
+fi
+
 command -v shpool >/dev/null 2>&1 || plain
 
 prefix="editor-$(basename "$PWD" | tr -c 'A-Za-z0-9._\n-' '_')"

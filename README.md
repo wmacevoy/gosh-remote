@@ -126,6 +126,32 @@ the screen, each offered to shpool upstream
 release and checked against the SHA-256 of each file (`tools/build-shpool.js`). The Linux builds are
 static, so Alpine hosts get one too. Apache-2.0, its licence beside it. Not available on Windows hosts.
 
+#### Pool terminals: attach, rename, detach (gosh-remote #3)
+
+A new terminal takes the first `editor-WORKSPACE-N` session that no terminal has. To choose, three
+commands, in the Command Palette and on a terminal's right-click and tab menus:
+
+- **Gosh-Remote: Attach Terminal to Session...** lists every shpool session on the host (other
+  workspaces', ones started from a login, ones held by a window that has gone), each marked *not
+  attached*, *attached elsewhere* or *this terminal*, and opens a terminal on the one you pick, or
+  on a new one you name. One attached elsewhere is taken over after you confirm (`shpool attach
+  -f`); one already in a terminal of this window is just shown. Also the button on the terminal
+  panel's title bar.
+- **Gosh-Remote: Rename Terminal's Session...** renames the session the active terminal is in (or
+  one you pick), with `shpool rename`, and the terminal's tab takes the name. A renamed session is
+  not taken by a new terminal by itself: it is yours to attach by name, so a long job (`claude`,
+  say) can be given a name and found by it. Needs gosh-shpool on the host; plain shpool has no
+  rename.
+- **Gosh-Remote: Detach Terminal's Session** detaches the active terminal's session (or an attached
+  one you pick, such as one a lost window still holds): its terminal closes and the shell keeps
+  running, to be attached again.
+
+Names are up to 64 letters, digits and `. _ : @ + = -`, with no spaces. Each command asks the host
+over ssh (`lib/sessions.sh`), so ssh must log in without asking, as for connecting. Which session a
+terminal is in is found from shpool's list, whose attached sessions name the pid of their `shpool
+attach`; its parent is the terminal launcher, the process the editor knows the terminal by. Terminals
+the editor opened by itself keep the tab title "shpool (persistent)" until renamed.
+
 ## When it doesn't work
 
 - **"gosh could not reach ... on UDP port ..., nor through ssh"**: setting up over ssh worked, and
@@ -151,6 +177,12 @@ Tested, by `node test/connect.test.js` with `GOSH_BUILD` set to a built gosh che
 - keeping a local copy of a folder: it arrives, and changes, additions and removals follow;
 - the persistent-terminals setting, with a stand-in shpool and with the real one it carries
   (gosh-shpool 0.11.7-gosh.2; `test/shpool.test.py`);
+- pool terminals, against that real shpool on Linux and macOS (`test/shpool.test.py`): the host's
+  script lists each session with the terminal holding it, renames one (and refuses a name in use),
+  and detaches one, whose terminal ends and whose shell stays; a new terminal leaves a renamed
+  session alone; the launcher's `--attach NAME` returns to that shell, background job and all,
+  refuses a session in use with the reason left on screen, takes it with `--force`, and refuses a
+  name that is not one. The commands' names, script and list-reading are unit-tested;
 - what the review of 2026-11-16 found, each case seen to fail before it was mended: a host that ssh
   would take for an option, refused, and ssh always told where its options end; downloads by https
   only, and each checked before it is unpacked or run (a changed `install.sh`, a changed editor
@@ -163,7 +195,8 @@ Tested, by `node test/connect.test.js` with `GOSH_BUILD` set to a built gosh che
 **Not tested:**
 
 - **The editor itself.** Nothing here has run inside VSCodium. The tests drive `lib/` with no
-  editor; `extension.js` is not run by any test.
+  editor; `extension.js` is not run by any test. So the pool-terminal commands' pickers, the
+  terminals they open, and the tab renaming are not tested.
 - **The editor's real server**, in the run above: it used `EDITOR_SERVER=standin`, a stand-in that
   says what the real one says and answers `/version`, because the real one is downloaded from
   GitHub. Without that setting the test downloads and runs the real one, as `remote-mosh`'s did.

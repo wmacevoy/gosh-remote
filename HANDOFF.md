@@ -74,9 +74,12 @@ Things to check:
 
 ## Still open
 
-- gosh-remote #3, items 1, 2 and 4: attaching a terminal to any session, taking one back after a
-  lost window, and showing the session's name on the terminal tab. Rename itself (item 3) is done,
-  through gosh-shpool.
+- gosh-remote #3: the commands are in (Attach Terminal to Session..., Rename Terminal's
+  Session..., Detach Terminal's Session; README, "Pool terminals"), tested against a real shpool
+  but not yet inside VSCodium. Still open from it: a window that comes back taking its own
+  sessions back by itself (item 2, now by hand: Attach, Take It Over), and the tab of a terminal
+  the editor opened by itself showing its session's name (item 4, now only after a rename or for
+  terminals opened by Attach).
 - gosh-remote #2: reconnects. #1: the how-to.
 - gosh-shpool: shpool's `signal_exit_unlinks_sockets` test (`shpool/tests/events.rs`) failed once
   on Ubuntu CI. It sends SIGTERM as soon as the sockets exist, apparently before the daemon has

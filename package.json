@@ -63,6 +63,22 @@
         "command": "goshRemote.openLocalCopies",
         "title": "Open the Folder of Local Copies",
         "category": "Gosh-Remote"
+      },
+      {
+        "command": "goshRemote.attachSession",
+        "title": "Attach Terminal to Session...",
+        "category": "Gosh-Remote",
+        "icon": "$(terminal-tmux)"
+      },
+      {
+        "command": "goshRemote.renameSession",
+        "title": "Rename Terminal's Session...",
+        "category": "Gosh-Remote"
+      },
+      {
+        "command": "goshRemote.detachSession",
+        "title": "Detach Terminal's Session",
+        "category": "Gosh-Remote"
       }
     ],
     "menus": {
@@ -92,6 +108,54 @@
         {
           "command": "goshRemote.copyThisFolder",
           "when": "false"
+        },
+        {
+          "command": "goshRemote.attachSession",
+          "when": "remoteName == gosh"
+        },
+        {
+          "command": "goshRemote.renameSession",
+          "when": "remoteName == gosh"
+        },
+        {
+          "command": "goshRemote.detachSession",
+          "when": "remoteName == gosh"
+        }
+      ],
+      "terminal/context": [
+        {
+          "command": "goshRemote.renameSession",
+          "when": "remoteName == gosh",
+          "group": "gosh@1"
+        },
+        {
+          "command": "goshRemote.detachSession",
+          "when": "remoteName == gosh",
+          "group": "gosh@2"
+        },
+        {
+          "command": "goshRemote.attachSession",
+          "when": "remoteName == gosh",
+          "group": "gosh@3"
+        }
+      ],
+      "terminal/title/context": [
+        {
+          "command": "goshRemote.renameSession",
+          "when": "remoteName == gosh",
+          "group": "gosh@1"
+        },
+        {
+          "command": "goshRemote.detachSession",
+          "when": "remoteName == gosh",
+          "group": "gosh@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "goshRemote.attachSession",
+          "when": "view == terminal && remoteName == gosh",
+          "group": "navigation@9"
         }
       ]
     },

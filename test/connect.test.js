@@ -35,6 +35,7 @@ const { connect, relayCommand, shellQuote, powershellQuote, remoteScript, remote
     clientOutcome, forwardSpec, clientEnvironment, cmdQuote, platformNotes, bundledShpool } = require('../lib/connect');
 const { localPackage, ensureLocalClient, allowedUrl, fetchReleaseFile } = require('../lib/install');
 const { mirror, mirrorDirectory } = require('../lib/mirror');
+const pool = require('../lib/sessions');
 
 function get(port, pathname) {
     return new Promise((resolve, reject) => {
@@ -86,6 +87,41 @@ function unitTests() {
     assert.strictEqual(bundledShpool(carried, 'linux-other'), null);
     assert.strictEqual(bundledShpool(null, 'linux-x64'), null);
     fs.rmSync(carried, { recursive: true, force: true });
+    // pool terminals (gosh-remote #3): names, the script's settings, which session a terminal is in
+    for (const good of ['editor-gosh-1', 'claude.review', 'a', 'x_y:z@h+1=2']) {
+        assert.strictEqual(pool.checkSessionName(good), good);
+    }
+    for (const bad of ['', '-f', '.x', 'two words', 'a\nb', "it's", 'a/b', '$(x)', 'x'.repeat(65), 7, undefined]) {
+        assert.throws(() => pool.checkSessionName(bad), /is not a session name/, String(bad));
+    }
+    const renaming = pool.sessionsScript('rename', 'editor-w-1', 'claude.review');
+    assert.ok(renaming.startsWith("ACTION='rename'\nNAME='editor-w-1'\nNEW_NAME='claude.review'\n"));
+    assert.ok(renaming.includes('shpool rename "$NAME" "$NEW_NAME"'));
+    assert.throws(() => pool.sessionsScript('rename', 'a', '-x'), /is not a session name/);
+    assert.throws(() => pool.sessionsScript('detach', "x'; rm -rf ~; '"), /is not a session name/);
+    assert.throws(() => pool.sessionsScript('kill', 'a'), /no such action/);
+    const listed = pool.parseList({
+        home: '/home/me', launcher: 'yes', rename: 'yes', processes: '400 300,401 1,500 7,',
+        sessions: Buffer.from(JSON.stringify({ sessions: [
+            { name: 'editor-w-1', id: 1, status: 'Attached', started_at_unix_ms: 1000, attachments: [{ pid: 400 }] },
+            { name: 'editor-w-2', id: 2, status: 'Disconnected', attachments: [] },
+            { name: 'held', id: 3, status: 'Attached', attachments: [{ pid: 999 }] }, // its client not in ps
+            { id: 4 }, // no name: left out
+        ] })).toString('base64'),
+    });
+    assert.deepStrictEqual(listed.sessions.map(s => [s.name, s.attached, s.terminals]),
+        [['editor-w-1', true, [300]], ['editor-w-2', false, []], ['held', true, []]]);
+    assert.ok(listed.launcher && listed.rename && listed.home === '/home/me');
+    assert.strictEqual(pool.sessionOfTerminal(listed, 300).name, 'editor-w-1');
+    assert.strictEqual(pool.sessionOfTerminal(listed, 301), undefined);
+    assert.strictEqual(pool.sessionOfTerminal(listed, undefined), undefined);
+    assert.deepStrictEqual(pool.parseList({ sessions: Buffer.from('{"sessions":[]}').toString('base64') }).sessions, []);
+    assert.throws(() => pool.parseList({ launcher: 'no' }), /could not be read/, 'no list reported is an error, not "no sessions"');
+    assert.throws(() => pool.parseList({ sessions: Buffer.from('{not json').toString('base64') }), /could not be read/);
+    assert.deepStrictEqual(pool.attachTerminal(listed, 'held', true),
+        { shellPath: '/home/me/.local/bin/gosh-remote-terminal', shellArgs: ['--attach', 'held', '--force'] });
+    assert.deepStrictEqual(pool.attachTerminal(listed, 'new', false).shellArgs, ['--attach', 'new']);
+    assert.throws(() => pool.attachTerminal({ ...listed, home: 'relative' }, 'x'), /home directory/);
     console.log('ok   unit tests');
 }
 
