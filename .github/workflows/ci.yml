@@ -37,8 +37,9 @@ jobs:
       run: pixi run test
 
   # The shpool the extension carries, for each kind of host it can be
-  # given to.  Built on the oldest Ubuntu there is a runner for, so that
-  # it runs on anything newer; one program for both kinds of Mac.
+  # given to: a gosh-shpool release, fetched and checked against the
+  # SHA-256s in tools/build-shpool.js, and tried with the terminal launcher
+  # on the kind of machine each is for.
   shpool:
     strategy:
       fail-fast: false
@@ -56,25 +57,17 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - uses: actions/cache@v4
-      id: cache
-      with:
-        path: shpool
-        key: shpool-${{ matrix.kind }}-${{ hashFiles('tools/build-shpool.js') }}
-
-    # with the runner's own Rust, which on a Mac can build for both kinds
-    - name: "build"
-      if: steps.cache.outputs.cache-hit != 'true'
+    - name: "fetch, and check"
       run: node tools/build-shpool.js
 
-    - name: "what it needs from the system"
+    - name: "what it needs from the system (the Linux ones nothing: static)"
       run: |
         file shpool/${{ matrix.kind }}/shpool
         if [ "$(uname -s)" = Darwin ]; then
           otool -L shpool/${{ matrix.kind }}/shpool
-        else
-          ldd shpool/${{ matrix.kind }}/shpool
-          echo "needs up to $(objdump -T shpool/${{ matrix.kind }}/shpool | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -n 1)"
+        elif file shpool/${{ matrix.kind }}/shpool | grep -q 'dynamically linked'; then
+          echo "::error::the shpool for ${{ matrix.kind }} hosts is not statically linked"
+          exit 1
         fi
 
     - name: "the terminal launcher, with this shpool"

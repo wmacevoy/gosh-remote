@@ -32,7 +32,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const { connect, relayCommand, shellQuote, powershellQuote, remoteScript, remotePowershell, checkHost, probe, sshRunner, runRemote,
-    clientOutcome, forwardSpec, clientEnvironment, cmdQuote, platformNotes } = require('../lib/connect');
+    clientOutcome, forwardSpec, clientEnvironment, cmdQuote, platformNotes, bundledShpool } = require('../lib/connect');
 const { localPackage, ensureLocalClient, allowedUrl, fetchReleaseFile } = require('../lib/install');
 const { mirror, mirrorDirectory } = require('../lib/mirror');
 
@@ -73,6 +73,19 @@ function unitTests() {
     assert.strictEqual(mirrorDirectory('/m', 'me@host', '/home/me/proj'), path.join('/m', 'me@host', 'home', 'me', 'proj'));
     assert.strictEqual(mirrorDirectory('/m', 'h', '/'), path.join('/m', 'h', 'root'));
     assert.strictEqual(mirrorDirectory('/m', 'a:b', '/x/../y'), path.join('/m', 'a_b', 'x', '_', 'y'));
+    // the shpool carried for each kind of host: the static Linux ones serve Alpine too
+    const carried = fs.mkdtempSync(path.join(os.tmpdir(), 'gosh-remote-carried-'));
+    for (const kind of ['linux-x64', 'linux-arm64', 'darwin']) {
+        fs.mkdirSync(path.join(carried, kind));
+        fs.writeFileSync(path.join(carried, kind, 'shpool'), kind);
+    }
+    assert.strictEqual(bundledShpool(carried, 'linux-x64'), path.join(carried, 'linux-x64', 'shpool'));
+    assert.strictEqual(bundledShpool(carried, 'alpine-x64'), path.join(carried, 'linux-x64', 'shpool'));
+    assert.strictEqual(bundledShpool(carried, 'alpine-arm64'), path.join(carried, 'linux-arm64', 'shpool'));
+    assert.strictEqual(bundledShpool(carried, 'darwin-arm64'), path.join(carried, 'darwin', 'shpool'));
+    assert.strictEqual(bundledShpool(carried, 'linux-other'), null);
+    assert.strictEqual(bundledShpool(null, 'linux-x64'), null);
+    fs.rmSync(carried, { recursive: true, force: true });
     console.log('ok   unit tests');
 }
 

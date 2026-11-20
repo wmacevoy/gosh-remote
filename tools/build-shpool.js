@@ -1,80 +1,91 @@
 // Copyright 2026 Warren D. MacEvoy. GPL-3.0-or-later. See github.com/wmacevoy/gosh/LICENSE-GOSH, and LICENSE-MOSH.
 'use strict';
 
-// Builds the shpool that the extension carries for hosts without one,
-// for the kind of machine this is run on, into
+// Puts the shpool that the extension carries for hosts without one into
 //
 //     shpool/linux-x64/shpool   shpool/linux-arm64/shpool   shpool/darwin/shpool
 //
-// along with shpool's licence.  On a Mac it builds for both kinds of
-// processor and joins the two.  Needs Rust (cargo); "pixi run shpool"
-// supplies it.
+// along with shpool's licence, from a gosh-shpool release
+// (https://github.com/wmacevoy/gosh-shpool): shpool with session rename and
+// fixes to its session restore, built for each kind of host.  The Linux ones
+// are linked statically, so they run on any Linux, Alpine's included; the
+// Mac one serves both kinds of processor.  Each archive is checked against
+// the SHA-256 written here before anything in it is used, so a release file
+// that changed since this was written is refused.
+//
+// Fetches all three on any machine; needs only Node.js and tar.
+// GOSH_SHPOOL_RELEASES=DIR takes the archives from DIR/vVERSION/ instead.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { fetchReleaseFile, sha256 } = require('../lib/install');
 
-const VERSION = '0.11.6';
+const VERSION = '0.11.7-gosh.2';
+const RELEASES = process.env.GOSH_SHPOOL_RELEASES || 'https://github.com/wmacevoy/gosh-shpool/releases/download';
+
+// kind of host (lib/connect.js) -> gosh-shpool's name for the build, and its archive's SHA-256
+const BUILDS = {
+    'linux-x64': { platform: 'linux-x86_64-musl', sha256: '81d0a34f36e43cd9568607efeb84270da9679061d4d4f03640bf75d43a6a7cf9' },
+    'linux-arm64': { platform: 'linux-aarch64-musl', sha256: '339b3d7be109bf4f2f9bae9a5ae956afb5fbb900d8fc8718085e1e9529b6d940' },
+    'darwin': { platform: 'macos-universal', sha256: '1e2d4ed6c89525c28d1f48bdfdfe9b467b32ec84a7b171a9fc00f0721efb62fa' },
+};
+
 const root = path.join(__dirname, '..');
-const work = path.join(root, '.shpool-build');
 
-function run(command, args, options = {}) {
-    console.log(`> ${command} ${args.join(' ')}`);
-    const result = spawnSync(command, args, { stdio: 'inherit', ...options });
+function tar(args) {
+    const result = spawnSync('tar', args, { stdio: 'inherit' });
     if (result.status !== 0) {
-        throw new Error(`${command} failed`);
+        throw new Error(`tar ${args.join(' ')} failed`);
     }
 }
 
-function build(target) {
-    const out = path.join(work, target || 'native');
-    const args = ['install', 'shpool', '--version', `=${VERSION}`, '--locked', '--root', out];
-    if (target) {
-        args.push('--target', target);
+async function main() {
+    const work = fs.mkdtempSync(path.join(os.tmpdir(), 'gosh-remote-shpool-'));
+    try {
+        let licence;
+        for (const [kind, build] of Object.entries(BUILDS)) {
+            const name = `gosh-shpool-${VERSION}-${build.platform}`;
+            const archive = path.join(work, `${name}.tar.gz`);
+            await fetchReleaseFile(RELEASES, VERSION, `${name}.tar.gz`, archive);
+            const sum = await sha256(archive);
+            if (sum !== build.sha256) {
+                throw new Error(`${name}.tar.gz is not the file this was written for: its SHA-256 is ${sum}, not ${build.sha256}`);
+            }
+            tar(['-xzf', archive, '-C', work, `${name}/shpool`, `${name}/LICENSE`]);
+
+            const destination = path.join(root, 'shpool', kind);
+            fs.mkdirSync(destination, { recursive: true });
+            fs.copyFileSync(path.join(work, name, 'shpool'), path.join(destination, 'shpool'));
+            fs.chmodSync(path.join(destination, 'shpool'), 0o755);
+            licence = path.join(work, name, 'LICENSE');
+            console.log(`shpool for ${kind} hosts: ${name} (sha256 ${sum})`);
+        }
+
+        // Its licence goes wherever it does.
+        fs.copyFileSync(licence, path.join(root, 'shpool', 'LICENSE'));
+        fs.writeFileSync(path.join(root, 'shpool', 'README.md'),
+            `gosh-shpool ${VERSION} (https://github.com/wmacevoy/gosh-shpool): shpool with session\n`
+            + 'rename and fixes to its session restore.  Its licence is in LICENSE beside this file.\n'
+            + 'The extension copies it to hosts that have no shpool when persistent terminals are\n'
+            + 'turned on.\n');
+
+        // The one for this machine, if there is one, should run.
+        const here = process.platform === 'darwin' ? 'darwin'
+            : process.platform === 'linux' ? `linux-${process.arch}` : null;
+        if (here && BUILDS[here]) {
+            const result = spawnSync(path.join(root, 'shpool', here, 'shpool'), ['version'], { stdio: 'inherit' });
+            if (result.status !== 0) {
+                throw new Error(`the shpool for ${here} hosts did not run here`);
+            }
+        }
+    } finally {
+        fs.rmSync(work, { recursive: true, force: true });
     }
-    run('cargo', args, { env: { ...process.env, MACOSX_DEPLOYMENT_TARGET: '11.0' } });
-    return path.join(out, 'bin', 'shpool');
 }
 
-let kind;
-let built;
-if (process.platform === 'linux' && (process.arch === 'x64' || process.arch === 'arm64')) {
-    kind = `linux-${process.arch}`;
-    built = build();
-    run('strip', [built]);
-} else if (process.platform === 'darwin') {
-    kind = 'darwin';
-    built = path.join(work, 'shpool-universal');
-    if (spawnSync('rustup', ['--version']).status === 0) {
-        const halves = ['aarch64-apple-darwin', 'x86_64-apple-darwin'].map(target => {
-            run('rustup', ['target', 'add', target]);
-            return build(target);
-        });
-        run('lipo', ['-create', '-output', built, ...halves]);
-    } else {
-        // A Rust that cannot be asked for the other kind of Mac (pixi's, for one).
-        console.log(`warning: no rustup, so this shpool will only run on Macs with a ${process.arch} processor`);
-        fs.mkdirSync(work, { recursive: true });
-        fs.copyFileSync(build(), built);
-    }
-    run('strip', ['-x', built]);
-    run('codesign', ['--force', '--sign', '-', built]);
-} else {
-    throw new Error(`shpool is not built for ${process.platform} on ${process.arch} hosts.`);
-}
-
-const destination = path.join(root, 'shpool', kind);
-fs.mkdirSync(destination, { recursive: true });
-fs.copyFileSync(built, path.join(destination, 'shpool'));
-fs.chmodSync(path.join(destination, 'shpool'), 0o755);
-
-// Its licence goes wherever it does.  (The crate does not include the text,
-// so a copy from shpool's repository is kept in third-party/.)
-fs.copyFileSync(path.join(root, 'third-party', 'shpool-LICENSE'), path.join(root, 'shpool', 'LICENSE'));
-fs.writeFileSync(path.join(root, 'shpool', 'README.md'),
-    `shpool ${VERSION} (https://github.com/shell-pool/shpool), built unmodified from crates.io.\n`
-    + 'Its licence is in LICENSE beside this file.  The extension copies it to hosts that have\n'
-    + 'no shpool when persistent terminals are turned on.\n');
-
-run(path.join(destination, 'shpool'), ['version']);
-console.log(`built shpool ${VERSION} for ${kind} hosts: ${path.join('shpool', kind, 'shpool')}`);
+main().catch(error => {
+    console.error(`build-shpool: ${error.message}`);
+    process.exit(1);
+});

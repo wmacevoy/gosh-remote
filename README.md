@@ -117,8 +117,14 @@ Set `goshRemote.persistentTerminals` to `shpool` and the terminals on the host a
 [shpool](https://github.com/shell-pool/shpool) sessions: quit the editor, come back tomorrow, open a
 terminal, and you are back in the shell you left. From any login to the host, `shpool list` shows
 them and `shpool attach NAME` joins one. A host with no shpool of its own is given the one the
-extension carries (0.11.6, built unmodified from crates.io; Apache-2.0, its licence in
-`third-party/`). Not available on Windows hosts.
+extension carries: [gosh-shpool](https://github.com/wmacevoy/gosh-shpool) 0.11.7-gosh.2, which is
+shpool 0.11.7 with `shpool rename` and fixes to its session restore that could lose what was on
+the screen, each offered to shpool upstream
+([shpool#459](https://github.com/shell-pool/shpool/pull/459),
+[shpool_vt100#2](https://github.com/shell-pool/shpool_vt100/pull/2),
+[shpool_vt100#3](https://github.com/shell-pool/shpool_vt100/pull/3)). It is fetched from that
+release and checked against the SHA-256 of each file (`tools/build-shpool.js`). The Linux builds are
+static, so Alpine hosts get one too. Apache-2.0, its licence beside it. Not available on Windows hosts.
 
 ## When it doesn't work
 
@@ -143,8 +149,8 @@ Tested, by `node test/connect.test.js` with `GOSH_BUILD` set to a built gosh che
   disturbing another;
 - the session carried by the relay when told to, and found by itself when UDP gets no answer;
 - keeping a local copy of a folder: it arrives, and changes, additions and removals follow;
-- the persistent-terminals setting, with a stand-in shpool and with the real 0.11.6
-  (`test/shpool.test.py`);
+- the persistent-terminals setting, with a stand-in shpool and with the real one it carries
+  (gosh-shpool 0.11.7-gosh.2; `test/shpool.test.py`);
 - what the review of 2026-11-16 found, each case seen to fail before it was mended: a host that ssh
   would take for an option, refused, and ssh always told where its options end; downloads by https
   only, and each checked before it is unpacked or run (a changed `install.sh`, a changed editor
@@ -169,4 +175,5 @@ Tested, by `node test/connect.test.js` with `GOSH_BUILD` set to a built gosh che
 
 ## Licence
 
-GPL-3.0-or-later (`LICENSE`). The shpool it carries is Apache-2.0 (`third-party/shpool-LICENSE`).
+GPL-3.0-or-later (`LICENSE`). The shpool it carries is Apache-2.0 (`shpool/LICENSE` in the package,
+`third-party/shpool-LICENSE` here).

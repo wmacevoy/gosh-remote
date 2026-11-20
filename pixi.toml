@@ -4,12 +4,12 @@
 #
 #     pixi run test     the tests (see test/connect.test.js for the full one)
 #     pixi run vsix     build gosh-remote-VERSION.vsix
-#     pixi run shpool   build the shpool the extension carries for hosts like
-#                       this machine (Linux or macOS); the .vsix includes
-#                       whatever has been built
+#     pixi run shpool   fetch the shpool the extension carries for hosts without
+#                       one (a gosh-shpool release, checked; tools/build-shpool.js);
+#                       the .vsix includes whatever has been fetched
 #
-# pixi provides Node.js, and Rust for building shpool; the packaging
-# tool (vsce) comes from npm, at the version recorded in package-lock.json.
+# pixi provides Node.js; the packaging tool (vsce) comes from npm, at the
+# version recorded in package-lock.json.
 
 [workspace]
 name = "gosh-remote"
@@ -24,15 +24,5 @@ nodejs = "22.*"
 deps = { cmd = "npm ci --no-audit --no-fund", inputs = ["package.json", "package-lock.json"], outputs = ["node_modules/.package-lock.json"] }
 test = "node test/connect.test.js"
 vsix = { cmd = "npm run package", depends-on = ["deps"] }
-
-# Rust, only for building shpool.
-[feature.shpool.dependencies]
-rust = "*"
-c-compiler = "*"
-
-[feature.shpool.tasks]
 shpool = "node tools/build-shpool.js"
-shpool-test = { cmd = "python3 test/shpool.test.py shpool/*/shpool", depends-on = ["shpool"] }
-
-[environments]
-shpool = ["shpool"]
+shpool-test = { cmd = "python3 test/shpool.test.py shpool/linux-x64/shpool", depends-on = ["shpool"] }
