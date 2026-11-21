@@ -38,6 +38,14 @@ options (one beginning with `-`) is refused, as is one with spaces, control char
 After that ssh is finished with, and everything goes through gosh, unless UDP cannot reach the
 host: see [When UDP is blocked](#when-udp-is-blocked).
 
+**When the editor loses its connection** (the lid closed, a change of network) it asks again. If
+the editor's server answers through the gosh session the window had, within 10 seconds, that
+session is kept and nothing is set up. If not, the steps above are run again, and the old session
+is ended only once a new one is up. If that fails too, the extension tells the editor to try again
+later. The editor keeps trying for up to 3 hours, retrying the old session each time. After
+connecting, what the gosh client says goes to the "Gosh - Remote" output with the time, so a drop
+leaves a record of why.
+
 ## What you need
 
 | | |
@@ -173,6 +181,9 @@ Tested, by `node test/connect.test.js` with `GOSH_BUILD` set to a built gosh che
 - a headless gosh session forwarding to the editor's server, which answers through the forward;
 - connecting again, reusing what is installed and running; closing one connection without
   disturbing another;
+- on a reconnect, a session whose forward still answers is kept, and one that does not is ended
+  only once a new one is up, with stand-ins for the sessions (`reconnect` in `lib/connect.js`;
+  that the editor is told to try again is in `extension.js`, which no test runs);
 - the session carried by the relay when told to, and found by itself when UDP gets no answer;
 - keeping a local copy of a folder: it arrives, and changes, additions and removals follow;
 - the persistent-terminals setting, with a stand-in shpool and with the real one it carries

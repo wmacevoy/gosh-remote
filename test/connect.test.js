@@ -27,12 +27,14 @@
 const assert = require('assert');
 const fs = require('fs');
 const http = require('http');
+const net = require('net');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 
 const { connect, relayCommand, shellQuote, powershellQuote, remoteScript, remotePowershell, checkHost, probe, sshRunner, runRemote,
-    clientOutcome, forwardSpec, clientEnvironment, cmdQuote, platformNotes, bundledShpool } = require('../lib/connect');
+    clientOutcome, forwardSpec, clientEnvironment, cmdQuote, platformNotes, bundledShpool,
+    reconnect, editorAnswers, lineSplitter, freePort } = require('../lib/connect');
 const { localPackage, ensureLocalClient, allowedUrl, fetchReleaseFile } = require('../lib/install');
 const { mirror, mirrorDirectory } = require('../lib/mirror');
 const pool = require('../lib/sessions');
@@ -123,6 +125,68 @@ function unitTests() {
     assert.deepStrictEqual(pool.attachTerminal(listed, 'new', false).shellArgs, ['--attach', 'new']);
     assert.throws(() => pool.attachTerminal({ ...listed, home: 'relative' }, 'x'), /home directory/);
     console.log('ok   unit tests');
+}
+
+/**
+ * REQ1/EXT-1: when the editor asks again for a host, a gosh session that still carries the forward
+ * is kept, and one that does not is ended only once a new one is up.  (Found 2026-11-20: a lid
+ * closed, the editor asked again, the live session was ended first, and the ssh setup that was to
+ * replace it was cut off by sleep, leaving nothing.)
+ */
+async function reconnectTests() {
+    const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
+    const answering = http.createServer((request, response) => {
+        response.writeHead(request.url === '/version' ? 200 : 404);
+        response.end('commit');
+    });
+    const silent = net.createServer(() => {}); // takes the connection and says nothing, as a forward whose session is down
+    const answerPort = await listen(answering);
+    const silentPort = await listen(silent);
+    const closedPort = await freePort();
+    try {
+        assert.strictEqual(await editorAnswers(answerPort, 2000), true);
+        assert.strictEqual(await editorAnswers(silentPort, 300), false, 'silence until the wait is a no');
+        assert.strictEqual(await editorAnswers(closedPort, 2000), false, 'a refused connection is a no');
+
+        const made = [];
+        const stub = port => ({ port, disposed: false, dispose() { this.disposed = true; } });
+        const setUp = () => { const c = stub(9); made.push(c); return Promise.resolve(c); };
+
+        // still carrying the forward: kept, and nothing set up
+        const live = stub(answerPort);
+        let result = await reconnect(live, setUp, { wait: 2000 });
+        assert.ok(result.reused && result.connection === live && !live.disposed && made.length === 0);
+
+        // not answering: a new one, and only then the old one ended
+        const dead = stub(silentPort);
+        result = await reconnect(dead, setUp, { wait: 300 });
+        assert.ok(!result.reused && result.connection === made[0] && dead.disposed);
+
+        // not answering, and the setup fails: the old one is left for the next ask
+        const asleep = stub(silentPort);
+        const refused = () => Promise.reject(new Error('Connection closed by host port 22'));
+        await assert.rejects(reconnect(asleep, refused, { wait: 300 }), /Connection closed/);
+        assert.ok(!asleep.disposed, 'a failed setup ends nothing');
+
+        // the first time: no previous, set up
+        result = await reconnect(undefined, setUp, { wait: 300 });
+        assert.ok(!result.reused && result.connection === made[1]);
+    } finally {
+        answering.close();
+        silent.close();
+    }
+
+    // what the gosh client says once connected arrives in pieces, and is passed on whole lines
+    const said = [];
+    const split = lineSplitter(line => said.push(line));
+    split.push('gosh: last contact 12');
+    split.push(' seconds ago\r\n\ngosh: re');
+    split.push('connected\n');
+    split.push('gosh: stopping');
+    assert.deepStrictEqual(said, ['gosh: last contact 12 seconds ago', 'gosh: reconnected']);
+    split.flush();
+    assert.deepStrictEqual(said.slice(2), ['gosh: stopping']);
+    console.log('ok   a reconnect keeps a live session, and ends a dead one only once replaced (REQ1/EXT-1)');
 }
 
 /** The review of 2026-11-16 (gosh's queue, item 11): each thing it found, held to account. */
@@ -494,6 +558,7 @@ function stopProgramsUnder(dir) {
 
 async function main() {
     unitTests();
+    await reconnectTests();
     const reviewScratch = fs.mkdtempSync(path.join(os.tmpdir(), 'gosh-remote-review-'));
     try {
         await reviewTests(reviewScratch);

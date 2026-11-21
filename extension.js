@@ -14,11 +14,15 @@ const os = require('os');
 const path = require('path');
 const vscode = require('vscode');
 
-const { connect } = require('./lib/connect');
+const { connect, reconnect } = require('./lib/connect');
 const { mirror, mirrorDirectory } = require('./lib/mirror');
 const pool = require('./lib/sessions');
 
 const AUTHORITY = 'gosh';
+
+// How long a reconnect waits for the editor's server through the session it had, before setting up
+// again: long enough for gosh to find the host after this machine wakes or changes network.
+const REUSE_WAIT = 10000;
 
 // The editor lower-cases authorities and is particular about what is in
 // them, so a host that is not plain is spelt out in hexadecimal.
@@ -34,6 +38,9 @@ function decodeHost(encoded) {
 function activate(context) {
     const output = vscode.window.createOutputChannel('Gosh - Remote');
     const connections = new Map(); // authority -> connection
+    const resolved = new Set(); // authorities connected to at least once: asked again, it is a reconnect
+    // Times on what is logged after connecting, to set beside the editor's own logs.
+    const stamped = line => output.appendLine(`${new Date().toISOString()} ${line}`);
     const product = JSON.parse(fs.readFileSync(path.join(vscode.env.appRoot, 'product.json'), 'utf8'));
 
     // ---- Local copies: folders on the host kept up to date on this machine (lib/mirror.js).
@@ -218,15 +225,13 @@ function activate(context) {
             const host = decodeHost(authority.slice(authority.indexOf('+') + 1));
             const settings = vscode.workspace.getConfiguration('goshRemote');
 
-            // The editor asks again when it has lost the connection: start afresh.
+            // The editor asks again when it has lost the connection: the session is kept if it still
+            // carries the forward, and otherwise replaced once a new one is up (lib/connect.js).
+            const reconnecting = resolved.has(authority);
             const previous = connections.get(authority);
-            if (previous) {
-                connections.delete(authority);
-                previous.dispose();
-            }
 
             try {
-                const connection = await vscode.window.withProgress(
+                const { connection, reused } = await reconnect(previous, () => vscode.window.withProgress(
                     { location: vscode.ProgressLocation.Notification, title: `Gosh: ${host}` },
                     progress => connect({
                         host,
@@ -245,24 +250,33 @@ function activate(context) {
                             output.appendLine(line);
                             progress.report({ message: line });
                         },
-                    }));
+                        clientLog: stamped,
+                    })), { wait: REUSE_WAIT, log: line => stamped(`${host}: ${line}`) });
 
-                connections.set(authority, connection);
-                reconcileCopies(host); // (gosh is on the host by now, which they need)
-                for (const note of connection.notes) {
-                    vscode.window.showWarningMessage(`${host}: ${note}`);
-                }
-                connection.exited.then(code => {
-                    if (connections.get(authority) === connection) {
-                        connections.delete(authority);
-                        output.appendLine(`The gosh session to ${host} ended (${code}).`);
+                resolved.add(authority);
+                if (!reused) {
+                    connections.set(authority, connection);
+                    reconcileCopies(host); // (gosh is on the host by now, which they need)
+                    for (const note of connection.notes) {
+                        vscode.window.showWarningMessage(`${host}: ${note}`);
                     }
-                });
+                    connection.exited.then(code => {
+                        if (connections.get(authority) === connection) {
+                            connections.delete(authority);
+                            stamped(`The gosh session to ${host} ended (${code}).`);
+                        }
+                    });
+                }
                 return new vscode.ResolvedAuthority('127.0.0.1', connection.port, connection.token);
             } catch (error) {
-                output.appendLine(`Could not connect to ${host}: ${error.message}`);
+                // Losing a connection the window had is usually passing (asleep, between networks):
+                // a temporary error has the editor ask again, within its grace time (3 hours), where any
+                // other has it give up for good.
+                stamped(`Could not connect to ${host}: ${error.message}${reconnecting ? ' (the editor will try again)' : ''}`);
                 output.show(true);
-                throw vscode.RemoteAuthorityResolverError.NotAvailable(error.message, true);
+                throw reconnecting
+                    ? vscode.RemoteAuthorityResolverError.TemporarilyNotAvailable(error.message)
+                    : vscode.RemoteAuthorityResolverError.NotAvailable(error.message, true);
             }
         },
     };
