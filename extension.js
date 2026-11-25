@@ -363,7 +363,12 @@ function activate(context) {
         };
     }
 
-    async function attachSession() {
+    /**
+     * Asks which session a terminal should be attached to, and returns that terminal's options;
+     * undefined if there is none to open (nothing chosen, or the session is already in a terminal
+     * of this window, which is shown instead).  For the command and the terminal profile both.
+     */
+    async function chooseAttachment() {
         const here = await poolHere();
         if (!here) {
             return;
@@ -418,14 +423,37 @@ function activate(context) {
             }
         }
         const folder = (vscode.workspace.workspaceFolders || []).find(f => f.uri.scheme === 'vscode-remote');
-        const terminal = vscode.window.createTerminal({
+        return {
             name,
             ...pool.attachTerminal(list, name, force),
             cwd: folder ? folder.uri : undefined,
             iconPath: new vscode.ThemeIcon('terminal-tmux'),
-        });
-        terminal.show();
+        };
     }
+
+    async function attachSession() {
+        const options = await chooseAttachment();
+        if (options) {
+            vscode.window.createTerminal(options).show();
+        }
+    }
+
+    // The same, from the new-terminal dropdown (the only way into that menu is a terminal profile).
+    // A profile provider cannot open nothing: the editor takes an empty answer as an error and shows
+    // its message (VSCodium 1.143, $createContributedProfileTerminal), so each way of opening
+    // nothing ends in a message saying why.
+    const sessionProfile = {
+        async provideTerminalProfile() {
+            if (!remoteHost()) {
+                throw new Error('Attach to Session works in a window connected to a host by Gosh-Remote.');
+            }
+            const options = await chooseAttachment();
+            if (!options) {
+                throw new Error('No terminal opened: no session was chosen, or it is already in a terminal here.');
+            }
+            return new vscode.TerminalProfile(options);
+        },
+    };
 
     async function renameSession() {
         const here = await poolHere();
@@ -548,6 +576,7 @@ function activate(context) {
         vscode.commands.registerCommand('goshRemote.attachSession', attachSession),
         vscode.commands.registerCommand('goshRemote.renameSession', renameSession),
         vscode.commands.registerCommand('goshRemote.detachSession', detachSession),
+        vscode.window.registerTerminalProfileProvider('goshRemote.session', sessionProfile),
         { dispose: () => [...copies.keys()].forEach(stopCopy) },
         { dispose: () => connections.forEach(connection => connection.dispose()) });
 }

@@ -214,7 +214,11 @@ commands, in the Command Palette and on a terminal's right-click and tab menus:
   attached*, *attached elsewhere* or *this terminal*, and opens a terminal on the one you pick, or
   on a new one you name. One attached elsewhere is taken over after you confirm (`shpool attach
   -f`); one already in a terminal of this window is just shown. Also the button on the terminal
-  panel's title bar.
+  panel's title bar, and **Gosh: Attach to Session...** in the new-terminal dropdown (the `⌄`
+  beside `+`). From the dropdown, a pick that opens no terminal (you chose nothing, or the session
+  was already in a terminal here) ends in an error message saying so: the editor allows a dropdown
+  entry no other way. The entry is in every window's dropdown, and in one not connected by
+  Gosh-Remote it only says so.
 - **Gosh-Remote: Rename Terminal's Session...** renames the session the active terminal is in (or
   one you pick), with `shpool rename`, and the terminal's tab takes the name. A renamed session is
   not taken by a new terminal by itself: it is yours to attach by name, so a long job (`claude`,
@@ -272,8 +276,8 @@ Tested, by `node test/connect.test.js` with `GOSH_BUILD` set to a built gosh che
 
 - **`extension.js`, by any test.** The tests drive `lib/` with no editor; the code that talks to
   the editor has run only in the use above. So what that use has not reached is not tested: the
-  pool-terminal commands' pickers, the terminals they open and the tab renaming, and the editor
-  being told to try again after a failed reconnect.
+  pool-terminal commands' pickers and the dropdown entry, the terminals they open and the tab
+  renaming, and the editor being told to try again after a failed reconnect.
 - **The editor's real server**, in the run above: it used `EDITOR_SERVER=standin`, a stand-in that
   says what the real one says and answers `/version`, because the real one is downloaded from
   GitHub. Without that setting the test downloads and runs the real one, as `remote-mosh`'s did.

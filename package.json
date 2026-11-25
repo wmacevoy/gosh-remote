@@ -29,10 +29,20 @@
     "resolvers"
   ],
   "activationEvents": [
-    "onResolveRemoteAuthority:gosh"
+    "onResolveRemoteAuthority:gosh",
+    "onTerminalProfile:goshRemote.session"
   ],
   "main": "./extension.js",
   "contributes": {
+    "terminal": {
+      "profiles": [
+        {
+          "id": "goshRemote.session",
+          "title": "Gosh: Attach to Session...",
+          "icon": "terminal-tmux"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "goshRemote.connect",

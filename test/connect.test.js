@@ -124,6 +124,20 @@ function unitTests() {
         { shellPath: '/home/me/.local/bin/gosh-remote-terminal', shellArgs: ['--attach', 'held', '--force'] });
     assert.deepStrictEqual(pool.attachTerminal(listed, 'new', false).shellArgs, ['--attach', 'new']);
     assert.throws(() => pool.attachTerminal({ ...listed, home: 'relative' }, 'x'), /home directory/);
+    // the manifest and extension.js agree (no test runs extension.js, so a name out of step would
+    // show only in the editor): each command is registered, and attaching a terminal to a session is
+    // offered in the new-terminal dropdown, by a profile whose provider is registered and woken
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    const code = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+    for (const { command } of manifest.contributes.commands) {
+        assert.ok(code.includes(`registerCommand('${command}'`), `${command} is not registered`);
+    }
+    const profiles = (manifest.contributes.terminal || {}).profiles || [];
+    assert.ok(profiles.some(p => p.id === 'goshRemote.session'), 'no terminal profile for attaching to a session');
+    for (const { id } of profiles) {
+        assert.ok(code.includes(`registerTerminalProfileProvider('${id}'`), `no provider for the terminal profile ${id}`);
+        assert.ok(manifest.activationEvents.includes(`onTerminalProfile:${id}`), `the terminal profile ${id} does not wake the extension`);
+    }
     console.log('ok   unit tests');
 }
 
