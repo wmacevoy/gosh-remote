@@ -59,6 +59,8 @@ the host as you would give it to ssh: `user@host`, or a name from your `~/.ssh/c
 
 It worked if **Gosh-Remote: Show Log** says `gosh: connected; forwarding.`
 
+A host that nothing can connect to, reached through a gosh meetup: [USE-CODIUM.md](USE-CODIUM.md).
+
 To try it from a checkout with no packaging, instead of steps 2 and 3:
 
 ```
