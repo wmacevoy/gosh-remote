@@ -1,0 +1,41 @@
+# Copyright 2026 Warren D. MacEvoy. GPL-3.0-or-later. See LICENSE.
+# The public site: the README, which is the user's guide, and nothing else. The repository is
+# private and a Pages site is public, so anything added here is published to everyone. Built the
+# way gosh's site is (gosh/.github/workflows/pages.yml).
+name: pages
+on:
+  push:
+    branches: [main]
+    paths: [README.md, .github/workflows/pages.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: The README, at the site's root
+        run: |
+          mkdir site
+          cp README.md site/index.md
+      - uses: actions/configure-pages@v5
+      - uses: actions/jekyll-build-pages@v1
+        with:
+          source: site
+          destination: _site
+      - uses: actions/upload-pages-artifact@v3
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
