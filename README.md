@@ -8,12 +8,112 @@ it. Here the editor talks to a port on your own machine, and a gosh session (mos
 forwards beside it) carries that port to the host. The editor never sees the network change: at
 worst it sees a pause.
 
-**Not independently reviewed, and not yet run inside an editor.** No third party has reviewed gosh
+**In use; not independently reviewed.** The extension has been in use since 2026-11-19, from
+VSCodium on macOS to a Debian 12 host, with persistent terminals. No third party has reviewed gosh
 or this extension. See [What has and has not been tested](#what-has-and-has-not-been-tested).
 
 It installs [gosh](https://github.com/wmacevoy/gosh) at both ends for you, from gosh's releases.
 Migrated from `remote-mosh`, which did the same with the fork `mosh-1.4.0-pf.*`. Its requirements,
 design, queue and findings live in gosh (`docs/REQUIREMENTS_v16.md`, `REQ1/EXT-1` to `REQ1/EXT-4`).
+
+## Getting started
+
+Five steps take you from nothing to a window on the host. Each says what you should see. `HOST` is
+the host as you would give it to ssh: `user@host`, or a name from your `~/.ssh/config`.
+
+1. **ssh first.** On your machine:
+
+   ```
+   ssh -o BatchMode=yes HOST true && echo ok
+   ```
+
+   It should print `ok` and nothing else. If it fails, fix that before going on: the extension
+   logs in with ssh and has nowhere to ask for a password, a passphrase or a new host key. Usually
+   it needs a key on the host (`ssh-copy-id HOST`), the key's passphrase in an agent
+   (`ssh-add`), or one ordinary `ssh HOST` to accept the host's key.
+
+2. **Install the extension.** Run **Extensions: Install from VSIX...** in the Command Palette and
+   pick the `.vsix`. A release of this extension carries one; `pixi run vsix` builds one from a
+   checkout. *Gosh - Remote* then appears among the installed extensions.
+
+3. **Allow the API it needs.** Remote extensions rely on an editor API that is not yet declared
+   stable, so the editor has to be told this one may use it. Run **Preferences: Configure Runtime
+   Arguments**, and add to the `argv.json` it opens:
+
+   ```json
+   "enable-proposed-api": ["wmacevoy.gosh-remote"]
+   ```
+
+   (If there is an `enable-proposed-api` line already, add `"wmacevoy.gosh-remote"` to its list.)
+   Then **quit the editor fully** and start it again: Cmd-Q on macOS, or **File > Exit**. Closing
+   its windows is not enough, because the file is read only when the editor starts.
+
+4. **Connect.** Run **Gosh-Remote: Connect to Host...** from the Command Palette, or from the
+   remote indicator in the bottom-left corner, and give `HOST`. A new window opens on that host
+   (its address is `gosh+HOST`). The first connection to a host takes a minute or two, because it
+   downloads gosh and the editor's server there; later ones take seconds.
+
+5. **Trust the folder.** When the window asks whether you trust the authors of the files in the
+   folder, say yes. Until a window's folder is trusted the extension stays disabled in it (the
+   editor's Restricted Mode), and that looks as if it were broken.
+
+It worked if **Gosh-Remote: Show Log** says `gosh: connected; forwarding.`
+
+To try it from a checkout with no packaging, instead of steps 2 and 3:
+
+```
+codium --extensionDevelopmentPath=/path/to/gosh-remote --enable-proposed-api wmacevoy.gosh-remote
+```
+
+### Then: terminals that outlive the editor
+
+Add to your settings (**Preferences: Open User Settings (JSON)**):
+
+```json
+"goshRemote.persistentTerminals": "shpool"
+```
+
+Open a terminal in the remote window. In a plain ssh login to the host, `shpool list` should show
+it as a session `editor-FOLDER-1`, attached, where `FOLDER` is the folder the window has open.
+Start something in it, quit the editor, start it again and connect: a new terminal is that same
+shell, with what you started still running. From a plain login, `shpool attach editor-FOLDER-1`
+joins it (`shpool attach -f` takes it from the editor). See [Terminals that outlive the
+editor](#terminals-that-outlive-the-editor-req1ext-3) for the details, and for choosing, renaming
+and detaching sessions.
+
+### Then: a local copy of a folder
+
+Right-click a folder in the Explorer and choose **Keep a Local Copy of This Folder**. A copy appears
+on your machine at `~/gosh-remote-copies/HOST/path/on/the/host`. Change a file in the folder on the
+host (`date > FOLDER/hello.txt` in a terminal there): within a few seconds the copy has it too.
+
+It goes **one way**, from the host to your machine: an edit to the copy is replaced the next time
+the file changes on the host. Files removed on the host stay in the copy unless
+`goshRemote.localCopies.delete` is on. The folder is looked at for changes every 2 seconds, or every
+`goshRemote.localCopies.interval` seconds. See [Local copies of
+folders](#local-copies-of-folders-req1ext-4).
+
+## When it doesn't work
+
+Start with **Gosh-Remote: Show Log**: it says what was done and what went wrong. The usual causes:
+
+- **Nothing happens, or the extension shows as disabled**: the window's folder is not trusted.
+  Run **Workspaces: Manage Workspace Trust** and trust it.
+- **The remote commands fail at once, or no remote window opens**: the API is not allowed.
+  Check the `enable-proposed-api` line in `argv.json` (step 3), and quit the editor fully, not just
+  its windows.
+- **"Could not set up HOST"** with ssh's own complaint: ssh asked for something. Run
+  `ssh -o BatchMode=yes HOST true` and fix what it says (step 1).
+- **"gosh could not reach ... on UDP port ..., nor through ssh"**: setting up over ssh worked, and
+  then the session got no answer by UDP or by a second ssh connection. Open UDP 60000-61000 on the
+  host's firewall, and check `ssh -o BatchMode=yes HOST true`.
+- **It connects, but only after a few seconds' wait every time**: UDP is blocked, and the session
+  goes over ssh by itself after the wait. Set `goshRemote.relay` to `always` to skip the wait.
+- **"Could not set up HOST: ... installing gosh failed"**: the host could not fetch gosh's release.
+  While `wmacevoy/gosh` is private its releases cannot be downloaded without a login. Set
+  `goshRemote.releasesUrl` to a directory on your machine holding a copy of the release
+  (`vVERSION/` with its `SHA256SUMS`, `install.sh` and the client's archive); this note can go once
+  gosh is public.
 
 ## What it does when you connect
 
@@ -55,42 +155,12 @@ leaves a record of why.
 | `ssh` | On your machine, able to log in to the host **without asking anything**: keys or an agent, and a host key already accepted. There is nowhere for it to ask for a password. `ssh -o BatchMode=yes HOST true` must work. |
 | UDP | gosh uses a UDP port between 60000 and 61000 on the host. If your machine cannot reach it, the session is carried over ssh instead. |
 | On the host | `curl` or `wget`, `tar`, and `sha256sum`, `shasum` or `openssl` (to check what it downloads). |
-| The editor | VSCodium, with this extension allowed to use the API it needs (below). |
+| The editor | VSCodium, with this extension allowed to use the API it needs ([Getting started](#getting-started), step 3). |
 
-### Allowing the API
+## Settings
 
-Remote extensions rely on an editor API that is not yet declared stable, so the editor has to be
-told this one may use it. Run **Preferences: Configure Runtime Arguments** and add:
-
-```json
-"enable-proposed-api": ["wmacevoy.gosh-remote"]
-```
-
-then restart the editor.
-
-## Installing
-
-From a `.vsix`: **Extensions: Install from VSIX...** in the command palette. A release of this
-extension carries one; `pixi run vsix` builds one from a checkout.
-
-Or, to try it from a checkout with no packaging:
-
-```
-codium --extensionDevelopmentPath=/path/to/gosh-remote --enable-proposed-api wmacevoy.gosh-remote
-```
-
-## Using it
-
-Run **Gosh-Remote: Connect to Host...** from the command palette, or from the remote indicator in
-the bottom-left corner, and give the host as you would give it to ssh: `user@host`, or a name from
-your `~/.ssh/config`. A new window opens on that host (its address is `gosh+HOST`). The first
-connection to a host takes a while, because it downloads gosh and the editor's server there.
-
-**Gosh-Remote: Show Log** shows what it did and what went wrong.
-
-### Settings
-
-- `goshRemote.goshVersion`: the gosh release to use at both ends (default `0.2`).
+- `goshRemote.goshVersion`: the gosh release to use at both ends (default `0.3.1`, the one this
+  extension is in use with).
 - `goshRemote.releasesUrl`: where to download gosh from, if not GitHub (each release is the
   directory `vVERSION` under it). By https only, or a directory on your machine.
 - `goshRemote.sshPath`: the ssh program, if not the one on your `PATH`.
@@ -160,18 +230,13 @@ terminal is in is found from shpool's list, whose attached sessions name the pid
 attach`; its parent is the terminal launcher, the process the editor knows the terminal by. Terminals
 the editor opened by itself keep the tab title "shpool (persistent)" until renamed.
 
-## When it doesn't work
-
-- **"gosh could not reach ... on UDP port ..., nor through ssh"**: setting up over ssh worked, and
-  then the session got no answer by UDP or by a second ssh connection. Open UDP 60000-61000 on the
-  host's firewall, and check `ssh -o BatchMode=yes HOST true`.
-- **"Could not set up HOST: ... installing gosh failed"**: the host could not fetch gosh's release.
-  While `wmacevoy/gosh` is private its releases cannot be downloaded without a login; set
-  `goshRemote.releasesUrl` to a copy of them that the host can reach.
-- **It connects, but only after a few seconds' wait every time**: UDP is blocked; set
-  `goshRemote.relay` to `always`.
-
 ## What has and has not been tested
+
+**In use** since 2026-11-19: VSCodium 1.143 on macOS, to a Debian 12 host on x86-64, gosh 0.3.1 at
+both ends (fetched from a local copy of its releases by `goshRemote.releasesUrl`, while gosh is
+private). It connects and works, and with `persistentTerminals` set to `shpool` its terminals
+outlive the editor. Not yet tried in use: local copies, the pool-terminal commands (attach, rename,
+detach), a reconnect after the editor loses its connection, a Linux client, and a macOS host.
 
 Tested, by `node test/connect.test.js` with `GOSH_BUILD` set to a built gosh checkout, on Linux
 (x86-64), against gosh's own programs:
@@ -205,15 +270,17 @@ Tested, by `node test/connect.test.js` with `GOSH_BUILD` set to a built gosh che
 
 **Not tested:**
 
-- **The editor itself.** Nothing here has run inside VSCodium. The tests drive `lib/` with no
-  editor; `extension.js` is not run by any test. So the pool-terminal commands' pickers, the
-  terminals they open, and the tab renaming are not tested.
+- **`extension.js`, by any test.** The tests drive `lib/` with no editor; the code that talks to
+  the editor has run only in the use above. So what that use has not reached is not tested: the
+  pool-terminal commands' pickers, the terminals they open and the tab renaming, and the editor
+  being told to try again after a failed reconnect.
 - **The editor's real server**, in the run above: it used `EDITOR_SERVER=standin`, a stand-in that
   says what the real one says and answers `/version`, because the real one is downloaded from
   GitHub. Without that setting the test downloads and runs the real one, as `remote-mosh`'s did.
 - **ssh.** The "host" is this machine, reached by a local shell instead of ssh, and the relay on it
   is started directly.
-- **Windows**, at either end, and **macOS**: not run.
+- **Windows**, at either end: not run. **macOS**: the client in use only; the tests run on Linux,
+  and `test/shpool.test.py` on macOS too.
 - **gosh's published releases**: none with programs exists yet (v0.1 has none), and while gosh is
   private the default download cannot work.
 

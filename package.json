@@ -176,7 +176,7 @@
       "properties": {
         "goshRemote.goshVersion": {
           "type": "string",
-          "default": "0.2",
+          "default": "0.3.1",
           "description": "The release of gosh to use. It is installed on this machine and on each host you connect to, from gosh's releases (tag vVERSION)."
         },
         "goshRemote.releasesUrl": {
